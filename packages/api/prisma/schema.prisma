@@ -1,0 +1,259 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 用户角色枚举
+enum Role {
+  ADMIN
+  USER
+}
+
+// 用户状态枚举
+enum UserStatus {
+  ONLINE
+  IDLE
+  DO_NOT_DISTURB
+  OFFLINE
+}
+
+// 主题枚举
+enum Theme {
+  LIGHT
+  DARK
+  SYSTEM
+}
+
+// 隐私设置枚举
+enum PrivacySetting {
+  EVERYONE
+  FRIENDS_OF_FRIENDS
+}
+
+// 好友状态枚举
+enum FriendshipStatus {
+  PENDING
+  ACCEPTED
+  BLOCKED
+}
+
+// 服务器成员角色枚举
+enum ServerRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+// 频道类型枚举
+enum ChannelType {
+  TEXT
+  VOICE
+}
+
+// ============ 用户相关模型 ============
+
+model User {
+  id        String     @id @default(cuid())
+  username  String     @unique
+  password  String
+  email     String?    @unique
+  role      Role       @default(USER)
+  avatarUrl String?
+  bio       String?
+  status    UserStatus @default(OFFLINE)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  // 关联
+  settings              UserSettings?
+  sentFriendRequests    Friendship[]                  @relation("SentFriendRequests")
+  receivedFriendRequests Friendship[]                 @relation("ReceivedFriendRequests")
+  serverMembers         ServerMember[]
+  messages              Message[]
+  conversationsAsUser1  DirectMessageConversation[]   @relation("User1Conversations")
+  conversationsAsUser2  DirectMessageConversation[]   @relation("User2Conversations")
+  conversationStates    UserConversationState[]
+  generatedInviteCodes  UserInviteCode[]
+
+  @@index([username])
+  @@index([email])
+}
+
+model UserSettings {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // 最后选择的服务器和频道
+  lastSelectedServerId  String?
+  lastSelectedChannelId String?
+
+  // 主题设置
+  theme Theme @default(SYSTEM)
+
+  // 隐私设置
+  friendRequestPrivacy PrivacySetting @default(EVERYONE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ============ 好友系统 ============
+
+model Friendship {
+  id         String           @id @default(cuid())
+  senderId   String
+  sender     User             @relation("SentFriendRequests", fields: [senderId], references: [id], onDelete: Cascade)
+  receiverId String
+  receiver   User             @relation("ReceivedFriendRequests", fields: [receiverId], references: [id], onDelete: Cascade)
+  status     FriendshipStatus @default(PENDING)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  @@unique([senderId, receiverId])
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([status])
+}
+
+// ============ 服务器与频道 ============
+
+model Server {
+  id          String         @id @default(cuid())
+  name        String
+  description String?
+  iconUrl     String?
+  ownerId     String
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  // 关联
+  members      ServerMember[]
+  channels     Channel[]
+  inviteCodes  ServerInviteCode[]
+
+  @@index([ownerId])
+}
+
+model ServerMember {
+  id        String     @id @default(cuid())
+  serverId  String
+  server    Server     @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      ServerRole @default(MEMBER)
+  joinedAt  DateTime   @default(now())
+
+  @@unique([serverId, userId])
+  @@index([serverId])
+  @@index([userId])
+}
+
+model Channel {
+  id          String      @id @default(cuid())
+  name        String
+  description String?
+  type        ChannelType @default(TEXT)
+  serverId    String
+  server      Server      @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  // 关联
+  messages Message[]
+
+  @@index([serverId])
+}
+
+// ============ 消息系统 ============
+
+model Message {
+  id               String    @id @default(cuid())
+  encryptedContent String    @db.Text
+  authorId         String
+  author           User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  // 消息可以属于频道或私聊会话（二选一）
+  channelId                  String?
+  channel                    Channel?                   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  directMessageConversationId String?
+  conversation               DirectMessageConversation? @relation(fields: [directMessageConversationId], references: [id], onDelete: Cascade)
+
+  @@index([channelId])
+  @@index([directMessageConversationId])
+  @@index([authorId])
+  @@index([createdAt])
+}
+
+// ============ 私聊系统 ============
+
+model DirectMessageConversation {
+  id        String    @id @default(cuid())
+  user1Id   String
+  user1     User      @relation("User1Conversations", fields: [user1Id], references: [id], onDelete: Cascade)
+  user2Id   String
+  user2     User      @relation("User2Conversations", fields: [user2Id], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  // 关联
+  messages           Message[]
+  conversationStates UserConversationState[]
+
+  @@unique([user1Id, user2Id])
+  @@index([user1Id])
+  @@index([user2Id])
+}
+
+model UserConversationState {
+  id             String                    @id @default(cuid())
+  userId         String
+  user           User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversationId String
+  conversation   DirectMessageConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  // 该用户在此会话中已读的最后一条消息 ID
+  lastReadMessageId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, conversationId])
+  @@index([userId])
+  @@index([conversationId])
+}
+
+// ============ 邀请码系统 ============
+
+model UserInviteCode {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([code])
+  @@index([userId])
+}
+
+model ServerInviteCode {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  serverId  String
+  server    Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([code])
+  @@index([serverId])
+}

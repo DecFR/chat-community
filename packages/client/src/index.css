@@ -1,0 +1,94 @@
+@import "tailwindcss";
+
+@theme {
+  --color-discord-dark: #202225;
+  --color-discord-darker: #2f3136;
+  --color-discord-darkest: #292b2f;
+  --color-discord-gray: #36393f;
+  --color-discord-light-gray: #b9bbbe;
+  --color-discord-blue: #5865f2;
+  --color-discord-green: #3ba55d;
+  --color-discord-red: #ed4245;
+}
+
+@layer base {
+  body {
+    @apply bg-discord-dark text-white antialiased;
+  }
+
+  * {
+    @apply border-gray-700;
+  }
+
+  /* 全局沉浸式滚动条 */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #4f545c transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: #4f545c;
+    border-radius: 4px;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: #5f656c;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply px-4 py-2 rounded-md font-medium transition-colors duration-200;
+  }
+
+  .btn-primary {
+    @apply bg-discord-blue hover:bg-blue-600 text-white;
+  }
+
+  .btn-secondary {
+    @apply bg-discord-gray hover:bg-gray-600 text-white;
+  }
+
+  .btn-danger {
+    @apply bg-discord-red hover:bg-red-600 text-white;
+  }
+
+  .input {
+    @apply w-full px-4 py-2 bg-discord-darker border border-gray-700 rounded-md focus:outline-none focus:ring-2 focus:ring-discord-blue text-white placeholder-gray-400;
+  }
+
+  .card {
+    @apply bg-discord-darker rounded-lg p-4 shadow-lg;
+  }
+
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: #4f545c #2f3136;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: #2f3136;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: #4f545c;
+    border-radius: 4px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: #5f656c;
+  }
+}

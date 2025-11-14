@@ -1,0 +1,152 @@
+import { Router } from 'express';
+import { authMiddleware } from '../middleware/auth';
+
+const router = Router();
+
+// 所有服务器路由都需要认证
+router.use(authMiddleware);
+
+/**
+ * @route   POST /api/servers
+ * @desc    创建新服务器
+ * @access  Private
+ */
+router.post('/', async (req, res) => {
+  try {
+    const { name, description } = req.body;
+    const userId = req.user!.id;
+
+    const prisma = (await import('../utils/prisma')).default;
+
+    const server = await prisma.server.create({
+      data: {
+        name,
+        description,
+        ownerId: userId,
+        members: {
+          create: {
+            userId,
+            role: 'OWNER',
+          },
+        },
+        channels: {
+          create: {
+            name: 'general',
+            description: 'General chat channel',
+            type: 'TEXT',
+          },
+        },
+      },
+      include: {
+        channels: true,
+        members: true,
+      },
+    });
+
+    res.status(201).json({ success: true, data: server });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * @route   GET /api/servers
+ * @desc    获取用户的所有服务器
+ * @access  Private
+ */
+router.get('/', async (req, res) => {
+  try {
+    const userId = req.user!.id;
+    const prisma = (await import('../utils/prisma')).default;
+
+    const servers = await prisma.server.findMany({
+      where: {
+        members: {
+          some: {
+            userId,
+          },
+        },
+      },
+      include: {
+        channels: true,
+        _count: {
+          select: {
+            members: true,
+          },
+        },
+      },
+    });
+
+    res.json({ success: true, data: servers });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * @route   GET /api/servers/:id
+ * @desc    获取服务器详情
+ * @access  Private
+ */
+router.get('/:id', async (req, res) => {
+  try {
+    const serverId = req.params.id;
+    const prisma = (await import('../utils/prisma')).default;
+
+    const server = await prisma.server.findUnique({
+      where: { id: serverId },
+      include: {
+        channels: true,
+        members: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                username: true,
+                avatarUrl: true,
+                status: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!server) {
+      return res.status(404).json({ success: false, error: 'Server not found' });
+    }
+
+    res.json({ success: true, data: server });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * @route   POST /api/servers/:id/channels
+ * @desc    创建新频道
+ * @access  Private
+ */
+router.post('/:id/channels', async (req, res) => {
+  try {
+    const serverId = req.params.id;
+    const { name, description, type } = req.body;
+
+    const prisma = (await import('../utils/prisma')).default;
+
+    const channel = await prisma.channel.create({
+      data: {
+        name,
+        description,
+        type: type || 'TEXT',
+        serverId,
+      },
+    });
+
+    res.status(201).json({ success: true, data: channel });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+export default router;
