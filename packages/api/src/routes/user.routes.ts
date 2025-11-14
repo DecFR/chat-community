@@ -40,6 +40,18 @@ const upload = multer({
 });
 
 /**
+ * 注意: 路由顺序很重要。像 "/:id" 这样的通配路由必须放在更具体路由之后，
+ * 否则例如 "/search" 会被当作 id 捕获，导致搜索接口失效。
+ */
+
+/**
+ * @route   GET /api/users/search
+ * @desc    搜索用户（放在前面，避免被 ":id" 捕获）
+ * @access  Private
+ */
+router.get('/search', authMiddleware, userController.searchUsers);
+
+/**
  * @route   GET /api/users/:id
  * @desc    获取用户资料
  * @access  Private
@@ -74,11 +86,6 @@ router.get('/settings', authMiddleware, userController.getSettings);
  */
 router.put('/settings', authMiddleware, userController.updateSettings);
 
-/**
- * @route   GET /api/users/search
- * @desc    搜索用户
- * @access  Private
- */
-router.get('/search', authMiddleware, userController.searchUsers);
+// 其余路由保持不变
 
 export default router;

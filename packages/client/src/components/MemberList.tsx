@@ -16,22 +16,7 @@ export default function MemberList() {
   const location = useLocation();
   const [members, setMembers] = useState<Member[]>([]);
 
-  // 在管理员面板页面不显示成员列表
-  if (location.pathname.includes('/admin')) {
-    return null;
-  }
-
-  // 在主页（好友面板）和私聊页面不显示成员列表
-  if (location.pathname === '/app' || location.pathname === '/app/' || location.pathname.includes('/dm/')) {
-    return null;
-  }
-
-  // 如果没有选中服务器，不显示
-  if (!currentServerId) {
-    return null;
-  }
-
-  // 加载成员列表
+  // 加载成员列表 - Hooks 必须在所有条件判断之前调用
   useEffect(() => {
     const loadMembers = async () => {
       if (!currentServerId) {
@@ -57,6 +42,21 @@ export default function MemberList() {
 
     loadMembers();
   }, [currentServerId]);
+
+  // 在管理员面板页面不显示成员列表
+  if (location.pathname.includes('/admin')) {
+    return null;
+  }
+
+  // 在主页（好友面板）和私聊页面不显示成员列表
+  if (location.pathname === '/app' || location.pathname === '/app/' || location.pathname.includes('/dm/')) {
+    return null;
+  }
+
+  // 如果没有选中服务器，不显示
+  if (!currentServerId) {
+    return null;
+  }
 
   // 按角色和在线状态分组成员
   const onlineMembers = members.filter(m => m.status === 'ONLINE');

@@ -12,69 +12,91 @@ router.use(authMiddleware);
  * @access  Private
  */
 router.post('/', async (req, res) => {
-  try {
-    const { name, description } = req.body;
-    const userId = req.user!.id;
+  const { name, description } = req.body;
+  const userId = req.user!.id;
 
+  if (!name) {
+    return res.status(400).json({ success: false, error: '服务器名称不能为空' });
+  }
+
+  try {
     const prisma = (await import('../utils/prisma')).default;
 
-    const server = await prisma.server.create({
-      data: {
-        name,
-        description,
-        ownerId: userId,
-        members: {
-          create: {
-            userId,
-            role: 'OWNER',
+    // 使用事务确保服务器和默认频道/成员的原子创建
+    const newServer = await prisma.$transaction(async (tx) => {
+      // 1. 创建服务器
+      const server = await tx.server.create({
+        data: {
+          name,
+          description: description || '',
+          ownerId: userId,
+        },
+      });
+
+      // 2. 创建默认的 "常规" 频道
+      await tx.channel.create({
+        data: {
+          name: '常规',
+          type: 'TEXT',
+          serverId: server.id,
+        },
+      });
+
+      // 3. 将创建者添加为服务器的 OWNER
+      await tx.serverMember.create({
+        data: {
+          userId,
+          serverId: server.id,
+          role: 'OWNER',
+        },
+      });
+      
+      // 4. 返回包含完整信息的服务器数据
+      return tx.server.findUnique({
+        where: { id: server.id },
+        include: {
+          channels: true,
+          owner: true,
+          _count: {
+            select: {
+              members: true,
+              channels: true,
+            },
           },
         },
-        channels: {
-          create: {
-            name: 'general',
-            description: 'General chat channel',
-            type: 'TEXT',
-          },
-        },
-      },
-      include: {
-        channels: true,
-        members: true,
-      },
+      });
     });
 
-    res.status(201).json({ success: true, data: server });
+    res.status(201).json({ success: true, data: newServer });
   } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    console.error('创建服务器失败:', error);
+    res.status(500).json({ success: false, error: '创建服务器时发生内部错误' });
   }
 });
 
 /**
  * @route   GET /api/servers
- * @desc    获取用户的所有服务器
+ * @desc    获取所有服务器
  * @access  Private
  */
 router.get('/', async (req, res) => {
   try {
-    const userId = req.user!.id;
     const prisma = (await import('../utils/prisma')).default;
 
     const servers = await prisma.server.findMany({
-      where: {
-        members: {
-          some: {
-            userId,
-          },
-        },
-      },
       include: {
         channels: true,
+        owner: true,
         _count: {
           select: {
             members: true,
+            channels: true,
           },
         },
       },
+      orderBy: {
+        createdAt: 'asc',
+      }
     });
 
     res.json({ success: true, data: servers });

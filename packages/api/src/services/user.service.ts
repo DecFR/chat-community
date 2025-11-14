@@ -120,13 +120,18 @@ export const userService = {
   /**
    * 搜索用户
    */
-  async searchUsers(query: string) {
+  async searchUsers(query: string, currentUserId?: string) {
     const users = await prisma.user.findMany({
       where: {
-        username: {
-          contains: query,
-          mode: 'insensitive',
-        },
+        AND: [
+          currentUserId ? { id: { not: currentUserId } } : {},
+          {
+            OR: [
+              { username: { contains: query, mode: 'insensitive' } },
+              { email: { contains: query, mode: 'insensitive' } },
+            ],
+          },
+        ],
       },
       select: {
         id: true,
@@ -136,8 +141,42 @@ export const userService = {
         status: true,
       },
       take: 20,
+      orderBy: { username: 'asc' },
     });
 
-    return users;
+    if (!currentUserId || users.length === 0) return users;
+
+    const targetIds = users.map(u => u.id);
+    const friendships = await prisma.friendship.findMany({
+      where: {
+        OR: [
+          { senderId: currentUserId, receiverId: { in: targetIds } },
+          { receiverId: currentUserId, senderId: { in: targetIds } },
+        ],
+      },
+      select: {
+        id: true,
+        senderId: true,
+        receiverId: true,
+        status: true,
+      },
+    });
+
+    const relByUser = new Map<string, 'FRIEND' | 'OUTGOING_PENDING' | 'INCOMING_PENDING' | 'NONE'>();
+    for (const u of users) relByUser.set(u.id, 'NONE');
+    for (const f of friendships) {
+      if (f.status === 'ACCEPTED') {
+        relByUser.set(f.senderId === currentUserId ? f.receiverId : f.senderId, 'FRIEND');
+      } else if (f.status === 'PENDING') {
+        if (f.senderId === currentUserId) {
+          relByUser.set(f.receiverId, 'OUTGOING_PENDING');
+        } else if (f.receiverId === currentUserId) {
+          relByUser.set(f.senderId, 'INCOMING_PENDING');
+        }
+      }
+    }
+
+    // 将关系附加到返回对象
+    return users.map(u => ({ ...u, relationship: relByUser.get(u.id) || 'NONE' }));
   },
 };

@@ -14,6 +14,7 @@ import friendRoutes from './routes/friend.routes';
 import serverRoutes from './routes/server.routes';
 import messageRoutes from './routes/message.routes';
 import adminRoutes from './routes/admin.routes';
+import serverRequestRoutes from './routes/serverRequest.routes';
 import inviteRoutes from './routes/invite.routes';
 
 // 加载环境变量
@@ -27,8 +28,18 @@ const httpServer = http.createServer(app);
 
 // 中间件
 app.use(helmet());
+// CORS：在开发环境放宽到本机任意端口，避免 Vite 端口变化导致登录失败
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  origin: (origin, callback) => {
+    const allowed = process.env.CLIENT_URL || 'http://localhost:5173';
+    const isDev = (process.env.NODE_ENV || 'development') === 'development';
+    if (!origin) return callback(null, true); // 同源或服务器端请求
+    if (origin === allowed) return callback(null, true);
+    if (isDev && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
   credentials: true,
 }));
 app.use(express.json());
@@ -46,6 +57,7 @@ app.use('/api/servers', serverRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/invites', inviteRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/server-requests', serverRequestRoutes);
 
 // 健康检查
 app.get('/health', (_req: Request, res: Response) => {

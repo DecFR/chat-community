@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { serverAPI } from '../lib/api';
 
-interface Channel {
+export interface Channel {
   id: string;
   name: string;
   description?: string;
@@ -9,13 +9,19 @@ interface Channel {
   serverId: string;
 }
 
-interface Server {
+export interface Server {
   id: string;
   name: string;
   description?: string;
-  iconUrl?: string;
+  imageUrl?: string;
   ownerId: string;
+  owner: { username: string };
   channels: Channel[];
+  createdAt: string;
+  _count?: {
+    members: number;
+    channels: number;
+  };
 }
 
 interface ServerState {
@@ -23,6 +29,7 @@ interface ServerState {
   currentServerId: string | null;
   currentChannelId: string | null;
   isLoading: boolean;
+  isServersLoaded: boolean; // 新增状态
   loadServers: () => Promise<void>;
   createServer: (name: string, description?: string) => Promise<void>;
   selectServer: (serverId: string) => void;
@@ -38,24 +45,31 @@ export const useServerStore = create<ServerState>((set, get) => ({
   currentServerId: null,
   currentChannelId: null,
   isLoading: false,
+  isServersLoaded: false, // 初始值为 false
 
   loadServers: async () => {
     try {
-      set({ isLoading: true });
+      console.log('[loadServers] Starting to load servers...');
       const response = await serverAPI.getServers();
       const servers = response.data.data;
-      set({ servers, isLoading: false });
+      console.log('[loadServers] Loaded servers:', servers);
+      console.log('[loadServers] Number of servers:', servers.length);
+      servers.forEach((s: any) => {
+        console.log(`  - Server: ${s.name}, Channels: ${s.channels?.length || 0}`);
+      });
+      // 一次性更新所有状态，避免中间状态
+      set({ servers, isLoading: false, isServersLoaded: true });
+      console.log('[loadServers] State updated successfully');
     } catch (error) {
-      console.error('Failed to load servers:', error);
-      set({ isLoading: false });
+      console.error('[loadServers] Failed to load servers:', error);
+      set({ isLoading: false, isServersLoaded: false });
     }
   },
 
   createServer: async (name, description) => {
     try {
-      const response = await serverAPI.createServer({ name, description });
-      const newServer = response.data.data;
-      set((state) => ({ servers: [...state.servers, newServer] }));
+      await serverAPI.createServer({ name, description });
+      await get().loadServers();
     } catch (error) {
       console.error('Failed to create server:', error);
       throw error;
@@ -63,7 +77,7 @@ export const useServerStore = create<ServerState>((set, get) => ({
   },
 
   selectServer: (serverId) => {
-    set({ currentServerId: serverId });
+    set({ currentServerId: serverId || null });
     if (!serverId) {
       // 切换到好友视图时清除频道选择
       set({ currentChannelId: null });

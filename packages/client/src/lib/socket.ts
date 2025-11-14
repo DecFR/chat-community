@@ -36,6 +36,8 @@ class SocketService {
 
   disconnect() {
     if (this.socket) {
+      // 在断开连接前更新状态为离线
+      this.socket.emit('updateStatus', 'OFFLINE');
       this.socket.disconnect();
       this.socket = null;
     }

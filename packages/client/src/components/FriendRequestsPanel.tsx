@@ -1,19 +1,27 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useFriendStore } from '../stores/friendStore';
 import { friendAPI } from '../lib/api';
 import { UserAvatar } from './UserAvatar';
+import { toast } from '../stores/toastStore';
 
 export default function FriendRequestsPanel() {
-  const { pendingRequests, loadPendingRequests } = useFriendStore();
+  const { pendingRequests, loadPendingRequests, loadFriends } = useFriendStore();
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    loadPendingRequests();
+  }, [loadPendingRequests]);
 
   const handleAccept = async (requestId: string) => {
     setIsLoading(true);
     try {
       await friendAPI.acceptRequest(requestId);
       await loadPendingRequests();
-    } catch (error) {
+      await loadFriends();
+      toast.success('已接受好友请求');
+    } catch (error: any) {
       console.error('Failed to accept friend request:', error);
+      toast.error(error?.response?.data?.error || '接受好友请求失败');
     } finally {
       setIsLoading(false);
     }
@@ -24,8 +32,10 @@ export default function FriendRequestsPanel() {
     try {
       await friendAPI.declineRequest(requestId);
       await loadPendingRequests();
-    } catch (error) {
+      toast.success('已拒绝好友请求');
+    } catch (error: any) {
       console.error('Failed to reject friend request:', error);
+      toast.error(error?.response?.data?.error || '拒绝好友请求失败');
     } finally {
       setIsLoading(false);
     }
@@ -46,50 +56,47 @@ export default function FriendRequestsPanel() {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto scrollbar-thin p-8">
-      <h2 className="text-2xl font-bold mb-6">
+    <div className="flex-1 overflow-y-auto scrollbar-thin p-2">
+      <h2 className="text-base font-bold mb-2 px-1 text-white">
         待处理的好友请求 ({pendingRequests.length})
       </h2>
 
-      <div className="space-y-4">
+      <div className="space-y-1">
         {pendingRequests.map((request: any) => (
           <div
             key={request.id}
-            className="card flex items-center justify-between"
+            className="bg-discord-darker p-2 rounded flex items-center justify-between hover:bg-discord-gray transition-colors"
           >
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
               <UserAvatar
-                username={request.requester.username}
-                avatarUrl={request.requester.avatarUrl}
-                size="lg"
+                username={request.sender?.username}
+                avatarUrl={request.sender?.avatarUrl}
+                size="sm"
               />
-              <div>
-                <div className="text-lg font-semibold">
-                  {request.requester.username}
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold text-white truncate">
+                  {request.sender?.username}
                 </div>
-                <div className="text-sm text-gray-400">
-                  @{request.requester.username}
-                </div>
-                {request.requester.bio && (
-                  <div className="text-sm text-gray-500 mt-1">
-                    {request.requester.bio}
+                {request.sender?.bio && (
+                  <div className="text-xs text-gray-400 truncate">
+                    {request.sender.bio}
                   </div>
                 )}
               </div>
             </div>
 
-            <div className="flex gap-3">
+            <div className="flex gap-1.5 flex-shrink-0">
               <button
                 onClick={() => handleAccept(request.id)}
                 disabled={isLoading}
-                className="btn btn-primary"
+                className="px-2 py-1 bg-discord-green hover:bg-green-600 text-white text-xs rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 接受
               </button>
               <button
                 onClick={() => handleReject(request.id)}
                 disabled={isLoading}
-                className="btn btn-secondary"
+                className="px-2 py-1 bg-discord-gray hover:bg-red-600 text-white text-xs rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 拒绝
               </button>

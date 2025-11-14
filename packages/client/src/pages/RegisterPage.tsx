@@ -62,7 +62,7 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-discord-dark p-4">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-discord-dark p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-white mb-2">创建账号</h1>
@@ -79,7 +79,7 @@ export default function RegisterPage() {
           <div className="card">
             <form onSubmit={handleSubmit} className="space-y-4">
               {error && (
-                <div className="bg-red-500/10 border border-red-500 text-red-500 px-4 py-3 rounded">
+                <div className="bg-red-500/10 border border-red-500 text-red-500 px-4 py-3 rounded text-sm">
                   {error}
                 </div>
               )}

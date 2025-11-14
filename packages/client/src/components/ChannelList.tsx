@@ -4,10 +4,13 @@ import { useNavigate } from 'react-router-dom';
 import { UserAvatar } from './UserAvatar';
 import { useAuthStore } from '../stores/authStore';
 import { useState, useEffect } from 'react';
+import FriendsPanel from './FriendsPanel';
+import FriendRequestsPanel from './FriendRequestsPanel';
+import UserSearchModal from './UserSearchModal';
 
 export default function ChannelList() {
-  const { servers, currentServerId, currentChannelId, selectChannel, createChannel, updateChannel, deleteChannel } = useServerStore();
-  const { friends, removeFriend } = useFriendStore();
+  const { servers, currentServerId, currentChannelId, selectChannel, createChannel, updateChannel, deleteChannel, isLoading } = useServerStore();
+  const { friends, removeFriend, loadFriends, loadPendingRequests } = useFriendStore();
   const { user } = useAuthStore();
   const navigate = useNavigate();
   const [isCreatingChannel, setIsCreatingChannel] = useState(false);
@@ -16,8 +19,17 @@ export default function ChannelList() {
   const [editingChannelName, setEditingChannelName] = useState('');
   const [contextMenuChannel, setContextMenuChannel] = useState<string | null>(null);
   const [contextMenuFriend, setContextMenuFriend] = useState<string | null>(null);
+  const [friendView, setFriendView] = useState<'list' | 'requests' | 'search'>('list');
 
   const currentServer = servers.find((s) => s.id === currentServerId);
+
+  // 当切换到好友视图时，刷新好友列表
+  useEffect(() => {
+    if (!currentServerId) {
+      loadFriends();
+      loadPendingRequests();
+    }
+  }, [currentServerId, loadFriends, loadPendingRequests]);
 
   // 点击频道，导航到聊天视图
   const handleChannelClick = (channelId: string) => {
@@ -114,72 +126,144 @@ export default function ChannelList() {
         </div>
 
         <div className="flex-1 overflow-y-auto scrollbar-thin">
-          {/* 好友列表 */}
+          {/* 功能切换按钮 */}
           <div className="p-2 space-y-1">
-            {friends.map((friend) => (
-              <div key={friend.id} className="relative">
-                <button
-                  onClick={() => handleFriendClick(friend.id)}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setContextMenuFriend(contextMenuFriend === friend.id ? null : friend.id);
-                  }}
-                  className="w-full px-2 py-2 rounded hover:bg-discord-gray text-left flex items-center justify-between group transition-colors"
-                >
-                  <div className="flex items-center space-x-3">
-                    <div className="relative">
-                      <UserAvatar
-                        username={friend.username}
-                        avatarUrl={friend.avatarUrl}
-                        size="sm"
-                      />
-                      <div
-                        className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-discord-darker ${
-                          friend.status === 'ONLINE'
-                            ? 'bg-green-500'
-                            : friend.status === 'IDLE'
-                            ? 'bg-yellow-500'
-                            : friend.status === 'DO_NOT_DISTURB'
-                            ? 'bg-red-500'
-                            : 'bg-gray-500'
-                        }`}
-                      ></div>
-                    </div>
-                    <span className="text-discord-light-gray group-hover:text-white">
-                      {friend.username}
-                    </span>
-                  </div>
+            <button
+              onClick={() => setFriendView('list')}
+              className={`w-full px-3 py-2 rounded text-left transition-colors ${
+                friendView === 'list'
+                  ? 'bg-discord-gray text-white'
+                  : 'text-discord-light-gray hover:bg-discord-gray hover:text-white'
+              }`}
+            >
+              <div className="flex items-center space-x-2">
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z" />
+                </svg>
+                <span>好友列表</span>
+              </div>
+            </button>
+
+            <button
+              onClick={() => setFriendView('requests')}
+              className={`w-full px-3 py-2 rounded text-left transition-colors ${
+                friendView === 'requests'
+                  ? 'bg-discord-gray text-white'
+                  : 'text-discord-light-gray hover:bg-discord-gray hover:text-white'
+              }`}
+            >
+              <div className="flex items-center space-x-2">
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+                </svg>
+                <span>好友请求</span>
+              </div>
+            </button>
+
+            <button
+              onClick={() => setFriendView('search')}
+              className={`w-full px-3 py-2 rounded text-left transition-colors ${
+                friendView === 'search'
+                  ? 'bg-discord-green text-white'
+                  : 'text-discord-green hover:bg-discord-green hover:text-white'
+              }`}
+            >
+              <div className="flex items-center space-x-2">
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M8 9a3 3 0 100-6 3 3 0 000 6zM8 11a6 6 0 016 6H2a6 6 0 016-6zM16 7a1 1 0 10-2 0v1h-1a1 1 0 100 2h1v1a1 1 0 102 0v-1h1a1 1 0 100-2h-1V7z" />
+                </svg>
+                <span>添加好友</span>
+              </div>
+            </button>
+          </div>
+
+          <div className="h-px bg-discord-border my-2"></div>
+
+          {/* 根据选中的视图显示不同内容 */}
+          {friendView === 'list' && (
+            <div className="p-2 space-y-1">
+              {friends.map((friend) => (
+                <div key={friend.id} className="relative">
                   <button
-                    onClick={(e) => {
-                      e.stopPropagation();
+                    onClick={() => handleFriendClick(friend.id)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
                       setContextMenuFriend(contextMenuFriend === friend.id ? null : friend.id);
                     }}
-                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-discord-darkest rounded transition-opacity"
+                    className="w-full px-2 py-2 rounded hover:bg-discord-gray text-left flex items-center justify-between group transition-colors"
                   >
-                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                      <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
-                    </svg>
-                  </button>
-                </button>
-                {contextMenuFriend === friend.id && (
-                  <div className="absolute right-2 top-10 bg-discord-darkest rounded shadow-lg py-1 z-10 min-w-[120px]">
-                    <button
-                      onClick={() => handleRemoveFriend(friend.id, friend.username)}
-                      className="w-full px-3 py-2 text-left text-red-400 hover:bg-red-500 hover:text-white text-sm transition-colors"
+                    <div className="flex items-center space-x-3">
+                      <div className="relative">
+                        <UserAvatar
+                          username={friend.username}
+                          avatarUrl={friend.avatarUrl}
+                          size="sm"
+                        />
+                        <div
+                          className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-discord-darker ${
+                            friend.status === 'ONLINE'
+                              ? 'bg-green-500'
+                              : friend.status === 'IDLE'
+                              ? 'bg-yellow-500'
+                              : friend.status === 'DO_NOT_DISTURB'
+                              ? 'bg-red-500'
+                              : 'bg-gray-500'
+                          }`}
+                        ></div>
+                      </div>
+                      <span className="text-discord-light-gray group-hover:text-white">
+                        {friend.username}
+                      </span>
+                    </div>
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setContextMenuFriend(contextMenuFriend === friend.id ? null : friend.id);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 p-1 hover:bg-discord-darkest rounded transition-opacity cursor-pointer"
                     >
-                      删除好友
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
+                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+                      </svg>
+                    </div>
+                  </button>
+                  {contextMenuFriend === friend.id && (
+                    <div className="absolute right-2 top-10 bg-discord-darkest rounded shadow-lg py-1 z-10 min-w-[120px]">
+                      <button
+                        onClick={() => handleRemoveFriend(friend.id, friend.username)}
+                        className="w-full px-3 py-2 text-left text-red-400 hover:bg-red-500 hover:text-white text-sm transition-colors"
+                      >
+                        删除好友
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
 
-            {friends.length === 0 && (
-              <div className="text-center text-gray-500 py-8">
-                还没有好友
-              </div>
-            )}
-          </div>
+              {friends.length === 0 && (
+                <div className="text-center text-gray-500 py-8 px-4">
+                  <p className="text-sm">还没有好友</p>
+                  <p className="text-xs mt-1">点击上方“添加好友”</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {friendView === 'requests' && (
+            <div className="p-2">
+              <FriendRequestsPanel />
+            </div>
+          )}
+
+          {friendView === 'search' && (
+            <div className="p-2">
+              <UserSearchModal
+                isOpen={true}
+                onClose={() => setFriendView('list')}
+                inline={true}
+              />
+            </div>
+          )}
         </div>
 
         {/* 底部用户信息栏 */}
@@ -201,6 +285,20 @@ export default function ChannelList() {
   }
 
   // 显示服务器频道
+  // 如果服务器数据正在加载或找不到 currentServer，显示加载状态
+  if (!currentServer) {
+    return (
+      <div className="w-60 bg-discord-darker flex flex-col">
+        <div className="h-12 border-b border-discord-darkest flex items-center px-4 font-semibold text-white shadow-md">
+          {isLoading ? '加载中...' : '服务器'}
+        </div>
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-gray-400 text-sm">{isLoading ? '加载中...' : '未找到服务器'}</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="w-60 bg-discord-darker flex flex-col">
       <div className="h-12 border-b border-discord-darkest flex items-center px-4 font-semibold text-white shadow-md">
@@ -254,7 +352,7 @@ export default function ChannelList() {
             </div>
           )}
 
-          {currentServer?.channels
+          {currentServer.channels
             .filter((c) => c.type === 'TEXT')
             .map((channel) => (
               <div key={channel.id} className="relative">
@@ -303,18 +401,18 @@ export default function ChannelList() {
                       <span className="text-gray-400">#</span>
                       <span>{channel.name}</span>
                     </div>
-                    {(user?.role === 'ADMIN' || currentServer?.ownerId === user?.id) && (
-                      <button
+                    {(user?.role === 'ADMIN' || currentServer.ownerId === user?.id) && (
+                      <div
                         onClick={(e) => {
                           e.stopPropagation();
                           setContextMenuChannel(contextMenuChannel === channel.id ? null : channel.id);
                         }}
-                        className="opacity-0 group-hover:opacity-100 p-1 hover:bg-discord-darkest rounded transition-opacity"
+                        className="opacity-0 group-hover:opacity-100 p-1 hover:bg-discord-darkest rounded transition-opacity cursor-pointer"
                       >
                         <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                           <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
                         </svg>
-                      </button>
+                      </div>
                     )}
                   </button>
                 )}
@@ -340,7 +438,7 @@ export default function ChannelList() {
               </div>
             ))}
 
-          {currentServer?.channels.filter((c) => c.type === 'TEXT').length === 0 && (
+          {currentServer.channels.filter((c) => c.type === 'TEXT').length === 0 && (
             <div className="text-gray-500 px-2 py-2 text-sm">暂无频道</div>
           )}
         </div>

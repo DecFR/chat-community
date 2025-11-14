@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useServerStore } from '../stores/serverStore';
 import { useFriendStore } from '../stores/friendStore';
@@ -13,7 +13,8 @@ import NotificationCenter from '../components/NotificationCenter';
 export default function MainLayout() {
   const navigate = useNavigate();
   const { user, isAuthenticated, loadUser } = useAuthStore();
-  const { loadServers } = useServerStore();
+  const { isServersLoaded, loadServers, selectServer } = useServerStore();
+  const location = useLocation();
   const { loadFriends, loadPendingRequests, updateFriendStatus } = useFriendStore();
   const [showSettings, setShowSettings] = useState(false);
 
@@ -23,23 +24,31 @@ export default function MainLayout() {
       return;
     }
 
-    // 加载用户信息
+    // 初始加载
     loadUser();
-
-    // 加载服务器和好友
-    loadServers();
+    if (!isServersLoaded) {
+      loadServers();
+    }
     loadFriends();
     loadPendingRequests();
 
     // 监听好友状态更新
-    socketService.on('friendStatusUpdate', (data: any) => {
+    const handleFriendStatusUpdate = (data: any) => {
       updateFriendStatus(data.userId, data.status);
-    });
+    };
+    socketService.on('friendStatusUpdate', handleFriendStatusUpdate);
 
     return () => {
-      socketService.off('friendStatusUpdate');
+      socketService.off('friendStatusUpdate', handleFriendStatusUpdate);
     };
-  }, [isAuthenticated, navigate, loadUser, loadServers, loadFriends, loadPendingRequests, updateFriendStatus]);
+  }, [isAuthenticated, navigate, loadUser, isServersLoaded, loadServers, loadFriends, loadPendingRequests, updateFriendStatus]);
+
+  // 路由守卫：当路径为 /app（主页）时，强制清空服务器/频道选择，避免任何副作用重新选中
+  useEffect(() => {
+    if (location.pathname === '/app') {
+      selectServer('');
+    }
+  }, [location.pathname, selectServer]);
 
   // 应用用户的主题设置
   useEffect(() => {
@@ -49,17 +58,11 @@ export default function MainLayout() {
       
       if (theme === 'LIGHT') {
         body.classList.add('light-theme');
-      } else if (theme === 'DARK') {
+      } else {
         body.classList.remove('light-theme');
-      } else if (theme === 'SYSTEM') {
-        if (window.matchMedia('(prefers-color-scheme: light)').matches) {
-          body.classList.add('light-theme');
-        } else {
-          body.classList.remove('light-theme');
-        }
       }
     }
-  }, [user?.settings?.theme]);
+  }, [user]);
 
   if (!user) {
     return (
@@ -78,7 +81,7 @@ export default function MainLayout() {
       <ChannelList />
 
       {/* 主内容区域 */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col min-h-0 min-w-0">
         {/* 顶部状态栏 */}
         <div className="h-12 bg-discord-darker border-b border-discord-darkest flex items-center justify-end px-4 gap-2">
           <NotificationCenter />
@@ -93,6 +96,7 @@ export default function MainLayout() {
           </button>
         </div>
 
+        {/* 让子路由区域可滚动而不撑高父容器 */}
         <Outlet />
       </div>
 

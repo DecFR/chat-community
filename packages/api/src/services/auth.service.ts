@@ -84,7 +84,9 @@ export const authService = {
         email,
         role,
         settings: {
-          create: {},
+          create: {
+            theme: 'DARK',
+          },
         },
       },
       select: {

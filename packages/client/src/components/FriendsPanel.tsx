@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useFriendStore } from '../stores/friendStore';
 import { friendAPI } from '../lib/api';
 import FriendRequestsPanel from './FriendRequestsPanel';
@@ -9,6 +10,7 @@ type FriendTab = 'online' | 'all' | 'pending' | 'add';
 
 export default function FriendsPanel() {
   const { friends } = useFriendStore();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<FriendTab>('online');
   const [showUserSearch, setShowUserSearch] = useState(false);
 
@@ -59,7 +61,7 @@ export default function FriendsPanel() {
                     </div>
                     <button
                       className="btn btn-primary text-sm"
-                      onClick={() => alert('私聊功能开发中')}
+                      onClick={() => navigate(`/app/dm/${friend.id}`)}
                     >
                       发送消息
                     </button>
@@ -125,7 +127,7 @@ export default function FriendsPanel() {
                     </div>
                     <button
                       className="btn btn-primary text-sm"
-                      onClick={() => alert('私聊功能开发中')}
+                      onClick={() => navigate(`/app/dm/${friend.id}`)}
                     >
                       发送消息
                     </button>

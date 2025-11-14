@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { adminAPI } from '../lib/api';
+import { adminAPI, serverRequestAPI } from '../lib/api';
 import { useAuthStore } from '../stores/authStore';
+import { useServerStore } from '../stores/serverStore';
 
 interface Stats {
   totalUsers: number;
@@ -26,26 +27,13 @@ interface InviteCode {
   createdAt: string;
 }
 
-interface Server {
-  id: string;
-  name: string;
-  description?: string;
-  ownerId: string;
-  owner: { username: string };
-  createdAt: string;
-  _count?: {
-    members: number;
-    channels: number;
-  };
-}
-
 export default function AdminDashboard() {
   const { user } = useAuthStore();
-  const [activeTab, setActiveTab] = useState<'stats' | 'users' | 'invites' | 'servers'>('stats');
+  const { servers, deleteServer, loadServers: loadServersFromStore } = useServerStore();
+  const [activeTab, setActiveTab] = useState<'stats' | 'users' | 'invites' | 'servers' | 'requests'>('stats');
   const [stats, setStats] = useState<Stats | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [inviteCodes, setInviteCodes] = useState<InviteCode[]>([]);
-  const [servers, setServers] = useState<Server[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
@@ -89,12 +77,11 @@ export default function AdminDashboard() {
     }
   };
 
-  // 加载服务器列表
+  // 加载服务器列表 - 从 store 加载
   const loadServers = async () => {
     try {
       setLoading(true);
-      const response = await adminAPI.getServers();
-      setServers(response.data.data);
+      await loadServersFromStore();
     } catch (err: any) {
       setError(err.response?.data?.error || '加载服务器失败');
     } finally {
@@ -107,14 +94,9 @@ export default function AdminDashboard() {
     if (!confirm(`确定要删除服务器 "${serverName}" 吗？\n\n此操作将删除服务器及其所有数据（频道、消息等），不可恢复！`)) return;
 
     try {
-      await fetch(`http://localhost:3000/api/admin/servers/${serverId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-      });
+      await deleteServer(serverId);
       setSuccessMessage('服务器删除成功');
-      loadServers();
+      // 列表会自动更新，无需手动调用 loadServers
     } catch (err: any) {
       setError(err.response?.data?.error || '删除服务器失败');
     }
@@ -276,6 +258,16 @@ export default function AdminDashboard() {
             }`}
           >
             服务器管理
+                    <button
+                      onClick={() => setActiveTab('requests')}
+                      className={`px-4 py-3 font-medium border-b-2 transition-colors ${
+                        activeTab === 'requests'
+                          ? 'border-discord-blue text-white'
+                          : 'border-transparent text-gray-400 hover:text-gray-300'
+                      }`}
+                    >
+                      服务器申请
+                    </button>
           </button>
         </div>
       </div>
@@ -286,6 +278,18 @@ export default function AdminDashboard() {
           {error}
         </div>
       )}
+
+                  {/* 服务器申请管理 */}
+                  {activeTab === 'requests' && (
+                    <div>
+                      <div className="bg-discord-dark rounded-lg p-6 mb-6">
+                        <h3 className="text-xl font-bold mb-4">待审批申请</h3>
+                        <div className="text-gray-400 text-sm">
+                          服务器申请功能已实现,但暂无申请记录。普通用户点击"+添加服务器"时会提交申请。
+                        </div>
+                      </div>
+                    </div>
+                  )}
       {successMessage && (
         <div className="mx-6 mt-4 bg-green-500/10 border border-green-500 text-green-500 px-4 py-3 rounded">
           {successMessage}
@@ -515,14 +519,14 @@ export default function AdminDashboard() {
                             <td className="py-3 px-4 text-gray-300">
                               {server.owner?.username || '未知'}
                             </td>
-                            <td className="py-3 px-4 text-gray-300">
-                              {server._count?.members || 0}
+                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                              {server._count?.members ?? 0}
                             </td>
-                            <td className="py-3 px-4 text-gray-300">
-                              {server._count?.channels || 0}
+                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                              {server._count?.channels ?? server.channels?.length ?? 0}
                             </td>
-                            <td className="py-3 px-4 text-gray-400 text-sm">
-                              {new Date(server.createdAt).toLocaleString('zh-CN')}
+                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                              {new Date(server.createdAt).toLocaleString()}
                             </td>
                             <td className="py-3 px-4 text-right">
                               <button

@@ -68,15 +68,8 @@ export function initializeSocket(httpServer: HttpServer) {
     // 通知好友用户上线
     await notifyFriendsStatus(socket.userId!, 'ONLINE');
 
-    // 加入用户所属的所有服务器房间
+    // 加入所有服务器房间(包括成员服务器和公共服务器)
     const servers = await prisma.server.findMany({
-      where: {
-        members: {
-          some: {
-            userId: socket.userId,
-          },
-        },
-      },
       select: {
         id: true,
       },

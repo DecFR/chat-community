@@ -55,7 +55,8 @@ export const userAPI = {
     }),
   getSettings: () => api.get('/users/settings'),
   updateSettings: (data: any) => api.put('/users/settings', data),
-  searchUsers: (query: string) => api.get(`/users/search?q=${query}`),
+  // 使用 params 方式确保正确编码
+  searchUsers: (query: string) => api.get('/users/search', { params: { q: query } }),
 };
 
 // 好友 API
@@ -89,14 +90,26 @@ export const serverAPI = {
     api.delete(`/servers/${serverId}/channels/${channelId}`),
 };
 
+// 服务器申请 API
+export const serverRequestAPI = {
+  createRequest: (data: { name: string; description?: string; reason: string }) =>
+    api.post('/server-requests', data),
+  getMyRequests: () => api.get('/server-requests/my'),
+  getAllRequests: () => api.get('/server-requests'),
+  getPendingRequests: () => api.get('/server-requests/pending'),
+  reviewRequest: (requestId: string, data: { approved: boolean; reviewNote?: string }) =>
+    api.post(`/server-requests/${requestId}/review`, data),
+  deleteRequest: (requestId: string) => api.delete(`/server-requests/${requestId}`),
+};
+
 // 消息 API
 export const messageAPI = {
   getChannelMessages: (channelId: string, limit = 50, before?: string) =>
     api.get(`/messages/channel/${channelId}`, { params: { limit, before } }),
   getConversationMessages: (conversationId: string, limit = 50, before?: string) =>
     api.get(`/messages/conversation/${conversationId}`, { params: { limit, before } }),
-  getConversationState: (conversationId: string) =>
-    api.get(`/messages/conversation/${conversationId}/state`),
+  getConversationState: (friendId: string) =>
+    api.get(`/messages/conversation/${friendId}/state`),
 };
 
 // 管理员 API

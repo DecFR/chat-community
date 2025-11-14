@@ -25,7 +25,7 @@ interface ChatViewProps {
 
 export default function ChatView({ isDM = false }: ChatViewProps) {
   const { channelId, friendId } = useParams();
-  const { servers, currentChannelId, selectChannel } = useServerStore();
+  const { servers, currentChannelId, selectChannel, isLoading: isLoadingServers } = useServerStore();
   const { friends } = useFriendStore();
   const { user } = useAuthStore();
 
@@ -55,9 +55,18 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const loadMoreTriggerRef = useRef<HTMLDivElement>(null);
+  const firstUnreadRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const scrollToFirstUnread = () => {
+    if (firstUnreadRef.current) {
+      firstUnreadRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else {
+      scrollToBottom();
+    }
   };
 
   // 获取已读位置
@@ -90,15 +99,40 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
       setIsLoading(true);
       setHasMore(true);
       try {
-        // 注意: 这里需要根据isDM来调用不同的API
-        // 目前暂时使用频道消息API,后续需要实现私聊消息API
-        const response = await messageAPI.getChannelMessages(targetId, 50);
-        const loadedMessages = response.data.data;
-        setMessages(loadedMessages);
-        setHasMore(loadedMessages.length === 50); // 如果返回50条，可能还有更多
-        setTimeout(() => scrollToBottom(), 100);
+        if (isDM && friendId) {
+          // 私聊：先获取或创建会话，然后获取消息
+          const stateResponse = await messageAPI.getConversationState(friendId);
+          const conversationId = stateResponse.data.data?.conversationId;
+          
+          if (conversationId) {
+            const response = await messageAPI.getConversationMessages(conversationId, 50);
+            const loadedMessages = response.data.data;
+            setMessages(loadedMessages);
+            setHasMore(loadedMessages.length === 50);
+          } else {
+            // 新会话，暂时没有消息
+            setMessages([]);
+            setHasMore(false);
+          }
+        } else {
+          // 频道消息
+          const response = await messageAPI.getChannelMessages(targetId, 50);
+          const loadedMessages = response.data.data;
+          setMessages(loadedMessages);
+          setHasMore(loadedMessages.length === 50);
+        }
+        // 检查是否有未读消息
+        const key = `lastRead_${user?.id}_${targetId}`;
+        const savedLastRead = localStorage.getItem(key);
+        if (savedLastRead) {
+          setTimeout(() => scrollToFirstUnread(), 100);
+        } else {
+          setTimeout(() => scrollToBottom(), 100);
+        }
       } catch (error) {
         console.error('Failed to load messages:', error);
+        setMessages([]);
+        setHasMore(false);
       } finally {
         setIsLoading(false);
       }
@@ -107,15 +141,28 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
     loadMessages();
   }, [isDM, friendId, channelId]);
 
-  // 加载更多消息（历史记录）
+  // 加载更多消息(历史记录)
   const loadMoreMessages = async () => {
-    const targetId = isDM ? friendId : channelId;
-    if (!targetId || isLoadingMore || !hasMore || messages.length === 0) return;
+    if (isLoadingMore || !hasMore || messages.length === 0) return;
 
     setIsLoadingMore(true);
     try {
       const oldestMessage = messages[0];
-      const response = await messageAPI.getChannelMessages(targetId, 50, oldestMessage.id);
+      let response;
+      
+      if (isDM && friendId) {
+        // 私聊模式:需要先获取 conversationId
+        const stateRes = await messageAPI.getConversationState(friendId);
+        const conversationId = stateRes.data.data.conversationId;
+        response = await messageAPI.getConversationMessages(conversationId, 50, oldestMessage.id);
+      } else if (channelId) {
+        // 频道模式
+        response = await messageAPI.getChannelMessages(channelId, 50, oldestMessage.id);
+      } else {
+        setIsLoadingMore(false);
+        return;
+      }
+      
       const olderMessages = response.data.data;
       
       if (olderMessages.length > 0) {
@@ -169,19 +216,57 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
   // 监听新消息
   useEffect(() => {
     const targetId = isDM ? friendId : channelId;
-    const handleNewMessage = (message: Message & { channelId?: string }) => {
-      if (message.channelId === targetId) {
-        setMessages((prev) => [...prev, message]);
+    if (!targetId) return;
+
+    const handleNewMessage = (message: Message & { channelId?: string; directMessageConversationId?: string }) => {
+      if (isDM) {
+        // 私聊消息：需要匹配当前好友ID
+        if (message.authorId === friendId || message.authorId === user?.id) {
+          setMessages((prev) => {
+            if (prev.some(m => m.id === message.id)) {
+              return prev;
+            }
+            return [...prev, message];
+          });
+          setTimeout(() => scrollToBottom(), 100);
+          setTimeout(() => markAsRead(), 500);
+        }
+      } else {
+        // 频道消息
+        if (message.channelId === targetId) {
+          setMessages((prev) => {
+            if (prev.some(m => m.id === message.id)) {
+              return prev;
+            }
+            return [...prev, message];
+          });
+          setTimeout(() => scrollToBottom(), 100);
+          setTimeout(() => markAsRead(), 500);
+        }
+      }
+    };
+
+    const handleDirectMessage = (message: Message) => {
+      if (isDM && (message.authorId === friendId || message.authorId === user?.id)) {
+        setMessages((prev) => {
+          if (prev.some(m => m.id === message.id)) {
+            return prev;
+          }
+          return [...prev, message];
+        });
         setTimeout(() => scrollToBottom(), 100);
+        setTimeout(() => markAsRead(), 500);
       }
     };
 
     socketService.on('channelMessage', handleNewMessage);
+    socketService.on('directMessage', handleDirectMessage);
 
     return () => {
       socketService.off('channelMessage', handleNewMessage);
+      socketService.off('directMessage', handleDirectMessage);
     };
-  }, [isDM, friendId, channelId]);
+  }, [isDM, friendId, channelId, user]);
 
   // 当消息加载完成或有新消息时，标记为已读
   useEffect(() => {
@@ -197,14 +282,28 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    const targetId = isDM ? friendId : channelId;
-    if (!newMessage.trim() || !targetId) return;
+    if (!newMessage.trim()) return;
 
-    socketService.sendChannelMessage(targetId, newMessage);
+    if (isDM && friendId) {
+      socketService.sendDirectMessage(friendId, newMessage);
+    } else if (channelId) {
+      socketService.sendChannelMessage(channelId, newMessage);
+    }
+    
     setNewMessage('');
-    // 发送消息后立即标记为已读
     setTimeout(() => markAsRead(), 500);
   };
+
+  // 如果服务器数据正在加载且当前频道未找到，显示加载状态
+  if (!isDM && channelId && isLoadingServers && !currentChannel) {
+    return (
+      <div className="flex-1 flex items-center justify-center bg-discord-gray">
+        <div className="text-center">
+          <div className="text-discord-light-gray">加载中...</div>
+        </div>
+      </div>
+    );
+  }
 
   // 如果没有选中频道或好友，显示欢迎界面
   if ((!isDM && !channelId) || (isDM && !friendId)) {
@@ -219,7 +318,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-discord-gray">
+    <div className="flex-1 flex flex-col bg-discord-gray min-h-0 min-w-0">
       {/* 标题栏 */}
       <div className="h-12 bg-discord-darker border-b border-discord-darkest flex items-center px-4 shadow-md">
         <div className="flex items-center gap-2">
@@ -255,7 +354,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
       {/* 消息列表 */}
       <div
         ref={messagesContainerRef}
-        className="flex-1 overflow-y-auto scrollbar-thin p-4 space-y-4"
+        className="flex-1 overflow-y-auto scrollbar-thin p-4 space-y-4 min-h-0"
       >
         {isLoading ? (
           <div className="flex items-center justify-center h-full">
@@ -294,7 +393,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
             return (
               <div key={message.id}>
                 {showUnreadDivider && (
-                  <div className="relative flex items-center py-4">
+                  <div ref={firstUnreadRef} className="relative flex items-center py-4">
                     <div className="flex-1 border-t-2 border-discord-red"></div>
                     <span className="px-3 text-xs font-semibold text-discord-red uppercase">
                       未读消息

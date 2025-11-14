@@ -105,23 +105,44 @@ router.get('/conversation/:conversationId', async (req, res) => {
  * @desc    获取用户在会话中的阅读状态
  * @access  Private
  */
-router.get('/conversation/:conversationId/state', async (req, res) => {
+router.get('/conversation/:friendId/state', async (req, res) => {
   try {
-    const { conversationId } = req.params;
+    const { friendId } = req.params;
     const userId = req.user!.id;
 
     const prisma = (await import('../utils/prisma')).default;
+
+    // 查找或创建会话
+    let conversation = await prisma.directMessageConversation.findFirst({
+      where: {
+        OR: [
+          { user1Id: userId, user2Id: friendId },
+          { user1Id: friendId, user2Id: userId },
+        ],
+      },
+    });
+
+    if (!conversation) {
+      // 创建新会话
+      const [smallerId, largerId] = [userId, friendId].sort();
+      conversation = await prisma.directMessageConversation.create({
+        data: {
+          user1Id: smallerId,
+          user2Id: largerId,
+        },
+      });
+    }
 
     const state = await prisma.userConversationState.findUnique({
       where: {
         userId_conversationId: {
           userId,
-          conversationId,
+          conversationId: conversation.id,
         },
       },
     });
 
-    res.json({ success: true, data: state });
+    res.json({ success: true, data: { ...state, conversationId: conversation.id } });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }

@@ -32,8 +32,8 @@ export const authController = {
           return res.status(400).json(errorResponse('Validation failed', errors.array()[0].msg));
         }
 
-        const { username, password, email } = req.body;
-        const result = await authService.register({ username, password, email });
+        const { username, password, email, inviteCode } = req.body;
+        const result = await authService.register({ username, password, email, inviteCode });
 
         res.status(201).json(successResponse(result, 'User registered successfully'));
       } catch (error: any) {

@@ -94,12 +94,13 @@ export const userController = {
    */
   async searchUsers(req: Request, res: Response) {
     try {
-      const query = req.query.q as string;
-      if (!query || query.length < 2) {
-        return res.status(400).json(errorResponse('Query must be at least 2 characters'));
+      const raw = (req.query.q as string) || '';
+      const query = raw.trim();
+      if (!query || query.length < 1) {
+        return res.status(400).json(errorResponse('Query must not be empty'));
       }
 
-      const users = await userService.searchUsers(query);
+      const users = await userService.searchUsers(query, req.user!.id);
       res.json(successResponse(users));
     } catch (error: any) {
       res.status(400).json(errorResponse(error.message));

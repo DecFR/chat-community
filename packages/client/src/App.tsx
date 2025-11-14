@@ -6,12 +6,14 @@ import AdminDashboard from './pages/AdminDashboard';
 import ChatView from './components/ChatView';
 import WelcomeScreen from './components/WelcomeScreen';
 import { useAuthStore } from './stores/authStore';
+import Toasts from './components/Toasts';
 
 function App() {
   const { isAuthenticated } = useAuthStore();
 
   return (
     <BrowserRouter>
+      <Toasts />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />

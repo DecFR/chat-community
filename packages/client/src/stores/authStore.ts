@@ -70,9 +70,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: () => {
-    localStorage.removeItem('token');
-    socketService.disconnect();
-    set({ user: null, token: null, isAuthenticated: false });
+    // 先更新状态为离线，再断开连接
+    socketService.updateStatus('OFFLINE');
+    setTimeout(() => {
+      localStorage.removeItem('token');
+      socketService.disconnect();
+      set({ user: null, token: null, isAuthenticated: false });
+    }, 100);
   },
 
   loadUser: async () => {

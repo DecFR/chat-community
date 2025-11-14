@@ -1,28 +1,59 @@
 import { useServerStore } from '../stores/serverStore';
 import { useAuthStore } from '../stores/authStore';
 import { useNavigate } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { serverRequestAPI } from '../lib/api';
 
 export default function ServerList() {
-  const { servers, currentServerId, selectServer, createServer } = useServerStore();
+  const { servers, currentServerId, selectServer, createServer, isServersLoaded } = useServerStore();
   const { user } = useAuthStore();
   const navigate = useNavigate();
   const [isCreating, setIsCreating] = useState(false);
+  const hasAutoSelected = useRef(false); // 标记是否已经自动选择过服务器（仅首轮）
+  const initialPathRef = useRef<string>(window.location.pathname); // 记录挂载时的URL
 
   const handleHomeClick = () => {
-    selectServer(null!);
-    navigate('/app');
+    // 先清空状态，然后导航
+    selectServer('');
+    navigate('/app', { replace: true });
   };
 
   const handleServerClick = (serverId: string) => {
     const server = servers.find(s => s.id === serverId);
-    selectServer(serverId);
     
-    // 自动打开第一个频道
-    if (server && server.channels.length > 0) {
-      navigate(`/app/channel/${server.channels[0].id}`);
+    if (!server) {
+      console.error(`Server ${serverId} not found`);
+      alert('未找到服务器，请刷新页面后重试。');
+      return;
     }
+    
+    if (!server.channels || server.channels.length === 0) {
+      console.warn(`Server ${serverId} has no channels.`);
+      alert('该服务器还没有频道，请刷新页面后重试或联系管理员。');
+      return;
+    }
+    
+    selectServer(serverId);
+    navigate(`/app/channel/${server.channels[0].id}`);
   };
+
+  // 首次加载：仅依据“初始URL”决定是否需要根据频道自动选中服务器
+  // 这样后续从频道返回 /app 时，不会被此逻辑再次干扰
+  useEffect(() => {
+    const pathname = initialPathRef.current;
+    if (isServersLoaded && !hasAutoSelected.current && pathname.includes('/app/channel/')) {
+      const pathParts = pathname.split('/');
+      const channelIdFromUrl = pathParts[pathParts.length - 1];
+
+      for (const server of servers) {
+        if (server.channels.some(c => c.id === channelIdFromUrl)) {
+          selectServer(server.id);
+          hasAutoSelected.current = true;
+          break;
+        }
+      }
+    }
+  }, [isServersLoaded, servers, selectServer]);
 
   const handleAddServer = async () => {
     if (isCreating) return;
@@ -48,6 +79,8 @@ export default function ServerList() {
       }
     } else {
       // 普通用户需要申请
+        const description = prompt('请输入服务器描述（可选）：');
+      
       const serverName = prompt('请输入服务器名称：');
       if (!serverName || !serverName.trim()) return;
       
@@ -57,8 +90,22 @@ export default function ServerList() {
         return;
       }
       
-      // TODO: 提交服务器创建申请功能需要后端实现
-      alert('服务器创建申请功能待实现\n\n服务器名称：' + serverName + '\n创建理由：' + reason + '\n\n请联系管理员帮助创建服务器。');
+      try {
+        setIsCreating(true);
+        await serverRequestAPI.createRequest({
+          name: serverName.trim(),
+          description: description?.trim(),
+          reason: reason.trim(),
+        });
+        alert('申请已提交！\n\n请等待管理员审批。您可以在设置中查看申请状态。');
+      } catch (error: unknown) {
+        const errorMessage = error instanceof Error && 'response' in error
+          ? ((error as { response?: { data?: { error?: string } } }).response?.data?.error || '提交申请失败')
+          : '提交申请失败';
+        alert(errorMessage);
+      } finally {
+        setIsCreating(false);
+      }
     }
   };
 
@@ -93,8 +140,8 @@ export default function ServerList() {
           }`}
           title={server.name}
         >
-          {server.iconUrl ? (
-            <img src={server.iconUrl} alt={server.name} className="w-full h-full rounded-full object-cover" />
+          {server.imageUrl ? (
+            <img src={server.imageUrl} alt={server.name} className="w-full h-full rounded-full object-cover" />
           ) : (
             <span className="text-lg">{server.name.substring(0, 2).toUpperCase()}</span>
           )}
