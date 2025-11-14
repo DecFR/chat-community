@@ -1,6 +1,8 @@
 import prisma from '../utils/prisma';
 
 interface UpdateProfileData {
+  username?: string;
+  email?: string;
   bio?: string;
   status?: 'ONLINE' | 'IDLE' | 'DO_NOT_DISTURB' | 'OFFLINE';
   avatarUrl?: string;
@@ -43,6 +45,26 @@ export const userService = {
    * 更新用户资料
    */
   async updateProfile(userId: string, updates: UpdateProfileData) {
+    // 验证用户名唯一性
+    if (updates.username) {
+      const existingUser = await prisma.user.findUnique({
+        where: { username: updates.username },
+      });
+      if (existingUser && existingUser.id !== userId) {
+        throw new Error('用户名已被使用');
+      }
+    }
+
+    // 验证邮箱唯一性
+    if (updates.email) {
+      const existingUser = await prisma.user.findUnique({
+        where: { email: updates.email },
+      });
+      if (existingUser && existingUser.id !== userId) {
+        throw new Error('邮箱已被使用');
+      }
+    }
+
     const user = await prisma.user.update({
       where: { id: userId },
       data: updates,

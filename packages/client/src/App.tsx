@@ -3,6 +3,8 @@ import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import MainLayout from './pages/MainLayout';
 import AdminDashboard from './pages/AdminDashboard';
+import ChatView from './components/ChatView';
+import WelcomeScreen from './components/WelcomeScreen';
 import { useAuthStore } from './stores/authStore';
 
 function App() {
@@ -23,6 +25,9 @@ function App() {
             )
           }
         >
+          <Route index element={<WelcomeScreen />} />
+          <Route path="channel/:channelId" element={<ChatView />} />
+          <Route path="dm/:friendId" element={<ChatView isDM />} />
           <Route path="admin" element={<AdminDashboard />} />
         </Route>
         <Route path="/" element={<Navigate to="/app" replace />} />

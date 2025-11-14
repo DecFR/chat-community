@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { socketService } from '../lib/socket';
 
 interface Notification {
@@ -15,6 +15,7 @@ export default function NotificationCenter() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // 监听通知事件
@@ -32,6 +33,23 @@ export default function NotificationCenter() {
       socketService.off('notification', handleNewNotification);
     };
   }, []);
+
+  // 点击外部关闭通知面板
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isOpen]);
 
   const markAsRead = (id: string) => {
     setNotifications((prev) =>
@@ -66,7 +84,7 @@ export default function NotificationCenter() {
   };
 
   return (
-    <div className="relative">
+    <div className="relative" ref={dropdownRef}>
       {/* 通知铃铛按钮 */}
       <button
         onClick={() => setIsOpen(!isOpen)}

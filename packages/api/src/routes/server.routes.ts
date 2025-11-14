@@ -123,6 +123,83 @@ router.get('/:id', async (req, res) => {
 });
 
 /**
+ * @route   PUT /api/servers/:id
+ * @desc    更新服务器信息
+ * @access  Private
+ */
+router.put('/:id', async (req, res) => {
+  try {
+    const serverId = req.params.id;
+    const { name, description } = req.body;
+    const userId = req.user!.id;
+
+    const prisma = (await import('../utils/prisma')).default;
+
+    // 检查用户是否是服务器所有者或管理员
+    const member = await prisma.serverMember.findFirst({
+      where: {
+        serverId,
+        userId,
+      },
+    });
+
+    if (!member || (member.role !== 'OWNER' && member.role !== 'ADMIN')) {
+      return res.status(403).json({ success: false, error: 'No permission to update server' });
+    }
+
+    const server = await prisma.server.update({
+      where: { id: serverId },
+      data: {
+        ...(name && { name }),
+        ...(description !== undefined && { description }),
+      },
+      include: {
+        channels: true,
+      },
+    });
+
+    res.json({ success: true, data: server });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * @route   DELETE /api/servers/:id
+ * @desc    删除服务器
+ * @access  Private
+ */
+router.delete('/:id', async (req, res) => {
+  try {
+    const serverId = req.params.id;
+    const userId = req.user!.id;
+
+    const prisma = (await import('../utils/prisma')).default;
+
+    // 检查用户是否是服务器所有者
+    const server = await prisma.server.findUnique({
+      where: { id: serverId },
+    });
+
+    if (!server) {
+      return res.status(404).json({ success: false, error: 'Server not found' });
+    }
+
+    if (server.ownerId !== userId) {
+      return res.status(403).json({ success: false, error: 'Only server owner can delete the server' });
+    }
+
+    await prisma.server.delete({
+      where: { id: serverId },
+    });
+
+    res.json({ success: true, message: 'Server deleted successfully' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
  * @route   POST /api/servers/:id/channels
  * @desc    创建新频道
  * @access  Private
@@ -144,6 +221,88 @@ router.post('/:id/channels', async (req, res) => {
     });
 
     res.status(201).json({ success: true, data: channel });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * @route   PUT /api/servers/:serverId/channels/:channelId
+ * @desc    更新频道信息
+ * @access  Private
+ */
+router.put('/:serverId/channels/:channelId', async (req, res) => {
+  try {
+    const { serverId, channelId } = req.params;
+    const { name, description } = req.body;
+    const userId = req.user!.id;
+
+    const prisma = (await import('../utils/prisma')).default;
+
+    // 检查用户是否是服务器成员且有权限
+    const member = await prisma.serverMember.findFirst({
+      where: {
+        serverId,
+        userId,
+      },
+    });
+
+    if (!member || (member.role !== 'OWNER' && member.role !== 'ADMIN')) {
+      return res.status(403).json({ success: false, error: 'No permission to update channel' });
+    }
+
+    const channel = await prisma.channel.update({
+      where: { id: channelId },
+      data: {
+        ...(name && { name }),
+        ...(description !== undefined && { description }),
+      },
+    });
+
+    res.json({ success: true, data: channel });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * @route   DELETE /api/servers/:serverId/channels/:channelId
+ * @desc    删除频道
+ * @access  Private
+ */
+router.delete('/:serverId/channels/:channelId', async (req, res) => {
+  try {
+    const { serverId, channelId } = req.params;
+    const userId = req.user!.id;
+
+    const prisma = (await import('../utils/prisma')).default;
+
+    // 检查用户是否是服务器成员且有权限
+    const member = await prisma.serverMember.findFirst({
+      where: {
+        serverId,
+        userId,
+      },
+    });
+
+    if (!member || (member.role !== 'OWNER' && member.role !== 'ADMIN')) {
+      return res.status(403).json({ success: false, error: 'No permission to delete channel' });
+    }
+
+    // 检查是否是最后一个频道
+    const channelCount = await prisma.channel.count({
+      where: { serverId },
+    });
+
+    if (channelCount <= 1) {
+      return res.status(400).json({ success: false, error: 'Cannot delete the last channel' });
+    }
+
+    await prisma.channel.delete({
+      where: { id: channelId },
+    });
+
+    res.json({ success: true, message: 'Channel deleted successfully' });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }

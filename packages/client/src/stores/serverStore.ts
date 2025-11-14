@@ -28,6 +28,9 @@ interface ServerState {
   selectServer: (serverId: string) => void;
   selectChannel: (channelId: string) => void;
   createChannel: (serverId: string, name: string, description?: string) => Promise<void>;
+  updateChannel: (channelId: string, name: string, description?: string) => Promise<void>;
+  deleteChannel: (channelId: string) => Promise<void>;
+  deleteServer: (serverId: string) => Promise<void>;
 }
 
 export const useServerStore = create<ServerState>((set, get) => ({
@@ -61,14 +64,27 @@ export const useServerStore = create<ServerState>((set, get) => ({
 
   selectServer: (serverId) => {
     set({ currentServerId: serverId });
-    const server = get().servers.find((s) => s.id === serverId);
-    if (server && server.channels.length > 0) {
-      set({ currentChannelId: server.channels[0].id });
+    if (!serverId) {
+      // 切换到好友视图时清除频道选择
+      set({ currentChannelId: null });
     }
+    // 注意: 不在这里自动设置 currentChannelId
+    // 让 ServerList 组件负责导航到具体频道
   },
 
   selectChannel: (channelId) => {
     set({ currentChannelId: channelId });
+    
+    // 找到频道所属的服务器并设置为当前服务器
+    const state = get();
+    for (const server of state.servers) {
+      if (server.channels.some(c => c.id === channelId)) {
+        if (state.currentServerId !== server.id) {
+          set({ currentServerId: server.id });
+        }
+        break;
+      }
+    }
   },
 
   createChannel: async (serverId, name, description) => {
@@ -85,6 +101,80 @@ export const useServerStore = create<ServerState>((set, get) => ({
       }));
     } catch (error) {
       console.error('Failed to create channel:', error);
+      throw error;
+    }
+  },
+
+  updateChannel: async (channelId, name, description) => {
+    try {
+      // 找到频道所属的服务器ID
+      const state = get();
+      let serverId = '';
+      for (const server of state.servers) {
+        if (server.channels.some(c => c.id === channelId)) {
+          serverId = server.id;
+          break;
+        }
+      }
+      
+      if (!serverId) throw new Error('Server not found for channel');
+      
+      const response = await serverAPI.updateChannel(serverId, channelId, { name, description });
+      const updatedChannel = response.data.data;
+
+      set((state) => ({
+        servers: state.servers.map((server) => ({
+          ...server,
+          channels: server.channels.map((channel) =>
+            channel.id === channelId ? updatedChannel : channel
+          ),
+        })),
+      }));
+    } catch (error) {
+      console.error('Failed to update channel:', error);
+      throw error;
+    }
+  },
+
+  deleteChannel: async (channelId) => {
+    try {
+      // 找到频道所属的服务器ID
+      const state = get();
+      let serverId = '';
+      for (const server of state.servers) {
+        if (server.channels.some(c => c.id === channelId)) {
+          serverId = server.id;
+          break;
+        }
+      }
+      
+      if (!serverId) throw new Error('Server not found for channel');
+      
+      await serverAPI.deleteChannel(serverId, channelId);
+
+      set((state) => ({
+        servers: state.servers.map((server) => ({
+          ...server,
+          channels: server.channels.filter((channel) => channel.id !== channelId),
+        })),
+        currentChannelId: state.currentChannelId === channelId ? null : state.currentChannelId,
+      }));
+    } catch (error) {
+      console.error('Failed to delete channel:', error);
+      throw error;
+    }
+  },
+
+  deleteServer: async (serverId) => {
+    try {
+      await serverAPI.deleteServer(serverId);
+
+      set((state) => ({
+        servers: state.servers.filter((server) => server.id !== serverId),
+        currentServerId: state.currentServerId === serverId ? null : state.currentServerId,
+      }));
+    } catch (error) {
+      console.error('Failed to delete server:', error);
       throw error;
     }
   },

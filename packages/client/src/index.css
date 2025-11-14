@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
 @theme {
+  /* 暗色主题颜色 */
   --color-discord-dark: #202225;
   --color-discord-darker: #2f3136;
   --color-discord-darkest: #292b2f;
@@ -9,11 +10,122 @@
   --color-discord-blue: #5865f2;
   --color-discord-green: #3ba55d;
   --color-discord-red: #ed4245;
+  --color-discord-hover: #40444b;
+  --color-discord-border: #40444b;
+  
+  /* 亮色主题颜色 */
+  --color-light-bg: #ffffff;
+  --color-light-bg-secondary: #f2f3f5;
+  --color-light-bg-tertiary: #e3e5e8;
+  --color-light-text: #2e3338;
+  --color-light-text-secondary: #4e5058;
+  --color-light-border: #e3e5e8;
+  --color-light-hover: #e3e5e8;
 }
 
 @layer base {
+  /* 暗色主题（默认） */
   body {
     @apply bg-discord-dark text-white antialiased;
+  }
+
+  /* 亮色主题 */
+  body.light-theme {
+    background-color: var(--color-light-bg);
+    color: var(--color-light-text);
+  }
+
+  body.light-theme .bg-discord-dark {
+    background-color: var(--color-light-bg) !important;
+  }
+
+  body.light-theme .bg-discord-darker {
+    background-color: var(--color-light-bg-secondary) !important;
+  }
+
+  body.light-theme .bg-discord-darkest {
+    background-color: var(--color-light-bg-tertiary) !important;
+  }
+
+  body.light-theme .bg-discord-gray {
+    background-color: var(--color-light-bg-tertiary) !important;
+  }
+
+  body.light-theme .bg-discord-hover {
+    background-color: var(--color-light-hover) !important;
+  }
+
+  body.light-theme .text-white {
+    color: var(--color-light-text) !important;
+  }
+
+  body.light-theme .text-gray-400,
+  body.light-theme .text-gray-500 {
+    color: var(--color-light-text-secondary) !important;
+  }
+
+  body.light-theme .text-discord-light-gray {
+    color: var(--color-light-text-secondary) !important;
+  }
+
+  /* 亮色主题下的标题和标签文字 */
+  body.light-theme h1,
+  body.light-theme h2,
+  body.light-theme h3,
+  body.light-theme h4,
+  body.light-theme label,
+  body.light-theme button,
+  body.light-theme span,
+  body.light-theme div {
+    color: var(--color-light-text);
+  }
+
+  /* 保留特定颜色的元素 */
+  body.light-theme .text-discord-blue,
+  body.light-theme .text-discord-green,
+  body.light-theme .text-discord-red,
+  body.light-theme .text-red-500,
+  body.light-theme .text-green-500 {
+    /* 保持原有颜色 */
+  }
+
+  body.light-theme .border-discord-border,
+  body.light-theme .border-gray-700 {
+    border-color: var(--color-light-border) !important;
+  }
+
+  body.light-theme .scrollbar-thin::-webkit-scrollbar-track {
+    background: var(--color-light-bg-secondary);
+  }
+
+  body.light-theme .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: #b9bbbe;
+  }
+
+  /* 亮色主题下的输入框 */
+  body.light-theme .input {
+    background-color: var(--color-light-bg) !important;
+    border-color: var(--color-light-border) !important;
+    color: var(--color-light-text) !important;
+  }
+
+  body.light-theme .input::placeholder {
+    color: var(--color-light-text-secondary) !important;
+  }
+
+  /* 亮色主题下的卡片 */
+  body.light-theme .card {
+    background-color: var(--color-light-bg) !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1) !important;
+  }
+
+  /* 亮色主题下的文字颜色 */
+  body.light-theme .text-discord-light-gray {
+    color: var(--color-light-text-secondary) !important;
+  }
+
+  body.light-theme .text-gray-500 {
+    color: var(--color-light-text-secondary) !important;
   }
 
   * {

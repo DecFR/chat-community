@@ -26,12 +26,26 @@ interface InviteCode {
   createdAt: string;
 }
 
+interface Server {
+  id: string;
+  name: string;
+  description?: string;
+  ownerId: string;
+  owner: { username: string };
+  createdAt: string;
+  _count?: {
+    members: number;
+    channels: number;
+  };
+}
+
 export default function AdminDashboard() {
   const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState<'stats' | 'users' | 'invites' | 'servers'>('stats');
   const [stats, setStats] = useState<Stats | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [inviteCodes, setInviteCodes] = useState<InviteCode[]>([]);
+  const [servers, setServers] = useState<Server[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
@@ -69,9 +83,40 @@ export default function AdminDashboard() {
       const response = await adminAPI.getInviteCodes();
       setInviteCodes(response.data.data);
     } catch (err: any) {
-      setError(err.response?.data?.error || '加载邀请码列表失败');
+      setError(err.response?.data?.error || '加载邀请码失败');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // 加载服务器列表
+  const loadServers = async () => {
+    try {
+      setLoading(true);
+      const response = await adminAPI.getServers();
+      setServers(response.data.data);
+    } catch (err: any) {
+      setError(err.response?.data?.error || '加载服务器失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 删除服务器
+  const handleDeleteServer = async (serverId: string, serverName: string) => {
+    if (!confirm(`确定要删除服务器 "${serverName}" 吗？\n\n此操作将删除服务器及其所有数据（频道、消息等），不可恢复！`)) return;
+
+    try {
+      await fetch(`http://localhost:3000/api/admin/servers/${serverId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        },
+      });
+      setSuccessMessage('服务器删除成功');
+      loadServers();
+    } catch (err: any) {
+      setError(err.response?.data?.error || '删除服务器失败');
     }
   };
 
@@ -161,27 +206,32 @@ export default function AdminDashboard() {
       loadUsers();
     } else if (activeTab === 'invites') {
       loadInviteCodes();
+    } else if (activeTab === 'servers') {
+      loadServers();
     }
   }, [activeTab]);
 
-  // 检查是否是管理员
+  // 如果不是管理员，返回空内容
   if (user?.role !== 'ADMIN') {
     return (
-      <div className="flex items-center justify-center h-full">
+      <div className="flex-1 flex items-center justify-center bg-discord-dark">
         <div className="text-center">
-          <h2 className="text-2xl font-bold text-white mb-2">访问被拒绝</h2>
-          <p className="text-gray-400">您没有权限访问管理员仪表板</p>
+          <div className="text-6xl mb-4">🚫</div>
+          <h2 className="text-2xl font-bold mb-2">无权访问</h2>
+          <p className="text-gray-400">你没有权限访问管理员面板</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col h-full bg-discord-dark">
-      {/* 头部 */}
-      <div className="bg-discord-darker border-b border-discord-border px-6 py-4">
-        <h1 className="text-2xl font-bold text-white">管理员仪表板</h1>
-        <p className="text-sm text-gray-400 mt-1">系统管理与监控</p>
+    <div className="flex-1 flex flex-col bg-discord-dark overflow-hidden">
+      {/* 顶部标题栏 */}
+      <div className="h-12 bg-discord-darker border-b border-discord-darkest flex items-center justify-between px-6">
+        <div>
+          <h1 className="text-xl font-bold">管理员仪表板</h1>
+          <p className="text-sm text-gray-400">系统管理与监控</p>
+        </div>
       </div>
 
       {/* 标签页导航 */}
@@ -423,14 +473,71 @@ export default function AdminDashboard() {
             {/* 服务器管理 */}
             {activeTab === 'servers' && (
               <div className="card">
-                <div className="text-center py-12">
-                  <svg className="w-16 h-16 mx-auto text-gray-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                  </svg>
-                  <h3 className="text-xl font-semibold text-white mb-2">服务器管理</h3>
-                  <p className="text-gray-400">暂无服务器数据</p>
-                  <p className="text-sm text-gray-500 mt-2">用户创建服务器后将在此显示</p>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-white">服务器列表</h3>
+                  <div className="text-sm text-gray-400">
+                    总计: {servers.length} 个服务器
+                  </div>
                 </div>
+
+                {servers.length === 0 ? (
+                  <div className="text-center py-12">
+                    <svg className="w-16 h-16 mx-auto text-gray-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                    </svg>
+                    <p className="text-gray-400">暂无服务器数据</p>
+                    <p className="text-sm text-gray-500 mt-2">用户创建服务器后将在此显示</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-gray-700">
+                          <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">服务器名称</th>
+                          <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">所有者</th>
+                          <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">成员数</th>
+                          <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">频道数</th>
+                          <th className="text-left py-3 px-4 text-sm font-semibold text-gray-400">创建时间</th>
+                          <th className="text-right py-3 px-4 text-sm font-semibold text-gray-400">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {servers.map((server) => (
+                          <tr key={server.id} className="border-b border-gray-800 hover:bg-discord-hover transition-colors">
+                            <td className="py-3 px-4">
+                              <div>
+                                <div className="font-medium text-white">{server.name}</div>
+                                {server.description && (
+                                  <div className="text-sm text-gray-400 mt-0.5">{server.description}</div>
+                                )}
+                              </div>
+                            </td>
+                            <td className="py-3 px-4 text-gray-300">
+                              {server.owner?.username || '未知'}
+                            </td>
+                            <td className="py-3 px-4 text-gray-300">
+                              {server._count?.members || 0}
+                            </td>
+                            <td className="py-3 px-4 text-gray-300">
+                              {server._count?.channels || 0}
+                            </td>
+                            <td className="py-3 px-4 text-gray-400 text-sm">
+                              {new Date(server.createdAt).toLocaleString('zh-CN')}
+                            </td>
+                            <td className="py-3 px-4 text-right">
+                              <button
+                                onClick={() => handleDeleteServer(server.id, server.name)}
+                                className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded transition-colors text-sm font-medium"
+                              >
+                                删除
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
           </>

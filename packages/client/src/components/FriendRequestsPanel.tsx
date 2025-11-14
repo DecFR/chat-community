@@ -65,7 +65,7 @@ export default function FriendRequestsPanel() {
               />
               <div>
                 <div className="text-lg font-semibold">
-                  {request.requester.displayName || request.requester.username}
+                  {request.requester.username}
                 </div>
                 <div className="text-sm text-gray-400">
                   @{request.requester.username}

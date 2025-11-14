@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuthStore } from '../stores/authStore';
 import { userAPI } from '../lib/api';
 import { UserAvatar } from './UserAvatar';
@@ -10,6 +10,33 @@ interface UserSettingsModalProps {
 
 type Tab = 'profile' | 'appearance' | 'privacy';
 
+// Toast通知组件
+function Toast({ message, type, onClose }: { message: string; type: 'success' | 'error'; onClose: () => void }) {
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      onClose();
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [onClose]);
+
+  return (
+    <div className="fixed top-4 right-4 z-[9999] animate-slide-in">
+      <div className={`px-6 py-3 rounded-lg shadow-lg flex items-center gap-3 ${
+        type === 'success' ? 'bg-green-500' : 'bg-red-500'
+      } text-white`}>
+        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+          {type === 'success' ? (
+            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+          ) : (
+            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+          )}
+        </svg>
+        <span className="font-medium">{message}</span>
+      </div>
+    </div>
+  );
+}
+
 export default function UserSettingsModal({
   isOpen,
   onClose,
@@ -17,28 +44,34 @@ export default function UserSettingsModal({
   const { user, refreshUser } = useAuthStore();
   const [activeTab, setActiveTab] = useState<Tab>('profile');
 
-  // Profile tab state
-  const [displayName, setDisplayName] = useState(user?.displayName || '');
+  const [username, setUsername] = useState(user?.username || '');
   const [email, setEmail] = useState(user?.email || '');
   const [bio, setBio] = useState(user?.bio || '');
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
-
-  // Appearance tab state
-  const [theme, setTheme] = useState<'LIGHT' | 'DARK' | 'SYSTEM'>(
-    user?.settings?.theme || 'DARK'
-  );
-
-  // Privacy tab state
-  const [friendRequestPrivacy, setFriendRequestPrivacy] = useState<
-    'EVERYONE' | 'FRIENDS_OF_FRIENDS' | 'NONE'
-  >(user?.settings?.friendRequestPrivacy || 'EVERYONE');
-
+  const [theme, setTheme] = useState<'LIGHT' | 'DARK' | 'SYSTEM'>(user?.settings?.theme || 'DARK');
+  const [friendRequestPrivacy, setFriendRequestPrivacy] = useState<'EVERYONE' | 'FRIENDS_OF_FRIENDS' | 'NONE'>(user?.settings?.friendRequestPrivacy || 'EVERYONE');
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  // 同步用户数据到本地状态
+  useEffect(() => {
+    if (user) {
+      setUsername(user.username || '');
+      setEmail(user.email || '');
+      setBio(user.bio || '');
+      setTheme(user.settings?.theme || 'DARK');
+      setFriendRequestPrivacy(user.settings?.friendRequestPrivacy || 'EVERYONE');
+    }
+  }, [user]);
 
   if (!isOpen || !user) return null;
+
+  // 切换标签时清除消息
+  const handleTabChange = (tab: Tab) => {
+    setActiveTab(tab);
+    setToast(null);
+  };
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -54,30 +87,27 @@ export default function UserSettingsModal({
 
   const handleProfileSave = async () => {
     setIsLoading(true);
-    setError(null);
-    setSuccessMessage(null);
+    setToast(null);
 
     try {
-      // 上传头像
       if (avatarFile) {
         const formData = new FormData();
         formData.append('avatar', avatarFile);
         await userAPI.uploadAvatar(formData);
       }
 
-      // 更新个人资料
       await userAPI.updateProfile({
-        displayName: displayName || undefined,
+        username: username !== user?.username ? username : undefined,
         email: email || undefined,
         bio: bio || undefined,
       });
 
       await refreshUser();
-      setSuccessMessage('个人资料已更新');
+      setToast({ message: '个人资料已更新', type: 'success' });
       setAvatarFile(null);
       setAvatarPreview(null);
     } catch (err: any) {
-      setError(err.response?.data?.message || '更新失败');
+      setToast({ message: err.response?.data?.error || err.response?.data?.message || '更新失败', type: 'error' });
     } finally {
       setIsLoading(false);
     }
@@ -85,32 +115,29 @@ export default function UserSettingsModal({
 
   const handleAppearanceSave = async () => {
     setIsLoading(true);
-    setError(null);
-    setSuccessMessage(null);
+    setToast(null);
 
     try {
       await userAPI.updateSettings({ theme });
       await refreshUser();
-      setSuccessMessage('外观设置已更新');
+      setToast({ message: '外观设置已更新', type: 'success' });
       
       // 应用主题
+      const body = document.body;
       if (theme === 'LIGHT') {
-        document.documentElement.classList.remove('dark');
+        body.classList.add('light-theme');
       } else if (theme === 'DARK') {
-        document.documentElement.classList.add('dark');
+        body.classList.remove('light-theme');
       } else {
         // SYSTEM: 根据系统偏好
-        if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-          document.documentElement.classList.add('dark');
+        if (window.matchMedia('(prefers-color-scheme: light)').matches) {
+          body.classList.add('light-theme');
         } else {
-          document.documentElement.classList.remove('dark');
+          body.classList.remove('light-theme');
         }
       }
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error && 'response' in err
-        ? ((err as { response?: { data?: { message?: string } } }).response?.data?.message || '更新失败')
-        : '更新失败';
-      setError(errorMessage);
+    } catch (err: any) {
+      setToast({ message: err.response?.data?.error || err.response?.data?.message || '更新失败', type: 'error' });
     } finally {
       setIsLoading(false);
     }
@@ -118,15 +145,14 @@ export default function UserSettingsModal({
 
   const handlePrivacySave = async () => {
     setIsLoading(true);
-    setError(null);
-    setSuccessMessage(null);
+    setToast(null);
 
     try {
       await userAPI.updateSettings({ friendRequestPrivacy });
       await refreshUser();
-      setSuccessMessage('隐私设置已更新');
+      setToast({ message: '隐私设置已更新', type: 'success' });
     } catch (err: any) {
-      setError(err.response?.data?.message || '更新失败');
+      setToast({ message: err.response?.data?.error || '更新失败', type: 'error' });
     } finally {
       setIsLoading(false);
     }
@@ -143,7 +169,7 @@ export default function UserSettingsModal({
                   <img
                     src={avatarPreview}
                     alt={user.username}
-                    className="w-24 h-24 rounded-full"
+                    className="w-24 h-24 rounded-full object-cover"
                   />
                 ) : (
                   <UserAvatar
@@ -180,21 +206,26 @@ export default function UserSettingsModal({
                   />
                 </label>
               </div>
-              <div className="flex-1">
-                <div className="text-sm text-gray-400 mb-1">用户名</div>
-                <div className="text-lg font-semibold">{user.username}</div>
+              <div>
+                <div className="text-sm text-gray-400 mb-1">当前用户</div>
+                <div className="text-xl font-semibold">{user.username}</div>
+                <div className="text-sm text-gray-500 mt-1">
+                  {user.role === 'ADMIN' ? '管理员' : '用户'}
+                </div>
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-2">显示名称</label>
+              <label className="block text-sm font-medium mb-2">用户名</label>
               <input
                 type="text"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
                 className="input"
-                placeholder="输入显示名称"
+                placeholder="输入用户名"
+                required
               />
+              <p className="text-xs text-gray-400 mt-1">用户名必须唯一</p>
             </div>
 
             <div>
@@ -374,7 +405,15 @@ export default function UserSettingsModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <>
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-discord-dark rounded-lg w-full max-w-4xl h-[80vh] flex overflow-hidden">
         {/* 左侧标签栏 */}
         <div className="w-60 bg-discord-darker p-4 space-y-2">
@@ -382,7 +421,7 @@ export default function UserSettingsModal({
             用户设置
           </h2>
           <button
-            onClick={() => setActiveTab('profile')}
+            onClick={() => handleTabChange('profile')}
             className={`w-full text-left px-4 py-2 rounded transition-colors ${
               activeTab === 'profile'
                 ? 'bg-discord-hover text-white'
@@ -392,7 +431,7 @@ export default function UserSettingsModal({
             个人资料
           </button>
           <button
-            onClick={() => setActiveTab('appearance')}
+            onClick={() => handleTabChange('appearance')}
             className={`w-full text-left px-4 py-2 rounded transition-colors ${
               activeTab === 'appearance'
                 ? 'bg-discord-hover text-white'
@@ -402,7 +441,7 @@ export default function UserSettingsModal({
             外观设置
           </button>
           <button
-            onClick={() => setActiveTab('privacy')}
+            onClick={() => handleTabChange('privacy')}
             className={`w-full text-left px-4 py-2 rounded transition-colors ${
               activeTab === 'privacy'
                 ? 'bg-discord-hover text-white'
@@ -412,12 +451,14 @@ export default function UserSettingsModal({
             隐私设置
           </button>
 
+          {/* 管理员入口 */}
           <div className="pt-4 mt-4 border-t border-gray-700">
             <button
               onClick={onClose}
-              className="w-full px-4 py-2 rounded text-gray-400 hover:bg-discord-red hover:text-white transition-colors"
+              className="w-full px-4 py-2 rounded text-gray-400 hover:bg-discord-red hover:text-white transition-colors flex items-center justify-center gap-2"
             >
-              关闭设置
+              <span className="text-xl">×</span>
+              <span>关闭</span>
             </button>
           </div>
         </div>
@@ -430,21 +471,10 @@ export default function UserSettingsModal({
             {activeTab === 'privacy' && '隐私设置'}
           </h2>
 
-          {error && (
-            <div className="mb-4 p-4 bg-red-500 bg-opacity-10 border border-red-500 rounded-lg text-red-500">
-              {error}
-            </div>
-          )}
-
-          {successMessage && (
-            <div className="mb-4 p-4 bg-green-500 bg-opacity-10 border border-green-500 rounded-lg text-green-500">
-              {successMessage}
-            </div>
-          )}
-
           {renderTabContent()}
         </div>
       </div>
     </div>
+    </>
   );
 }

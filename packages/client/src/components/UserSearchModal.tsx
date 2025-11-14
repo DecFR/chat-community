@@ -11,7 +11,6 @@ interface UserSearchModalProps {
 interface SearchResult {
   id: string;
   username: string;
-  displayName?: string;
   avatarUrl?: string;
   bio?: string;
   status: string;
@@ -142,7 +141,7 @@ export default function UserSearchModal({
               </div>
               <div className="flex-1">
                 <div className="text-lg font-semibold">
-                  {user.displayName || user.username}
+                  {user.username}
                 </div>
                 <div className="text-sm text-gray-400">@{user.username}</div>
                 {user.bio && (

@@ -1,5 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
+import { useParams } from 'react-router-dom';
 import { useServerStore } from '../stores/serverStore';
+import { useFriendStore } from '../stores/friendStore';
 import { useAuthStore } from '../stores/authStore';
 import { messageAPI } from '../lib/api';
 import { socketService } from '../lib/socket';
@@ -17,9 +19,33 @@ interface Message {
   createdAt: string;
 }
 
-export default function ChatView() {
-  const { currentChannelId } = useServerStore();
+interface ChatViewProps {
+  isDM?: boolean;
+}
+
+export default function ChatView({ isDM = false }: ChatViewProps) {
+  const { channelId, friendId } = useParams();
+  const { servers, currentChannelId, selectChannel } = useServerStore();
+  const { friends } = useFriendStore();
   const { user } = useAuthStore();
+
+  // 获取当前好友信息（如果是私聊模式）
+  const currentFriend = isDM && friendId ? friends.find(f => f.id === friendId) : null;
+
+  // 获取当前频道信息
+  const currentChannel = !isDM && channelId ? 
+    servers.flatMap(s => s.channels).find(c => c.id === channelId) : null;
+
+  // 同步URL参数和store状态
+  useEffect(() => {
+    if (!isDM && channelId) {
+      // 确保 store 中的 currentChannelId 与 URL 同步
+      if (channelId !== currentChannelId) {
+        selectChannel(channelId);
+      }
+    }
+  }, [isDM, channelId, currentChannelId, selectChannel]);
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -36,32 +62,37 @@ export default function ChatView() {
 
   // 获取已读位置
   useEffect(() => {
-    if (!currentChannelId || !user) return;
+    const targetId = isDM ? friendId : channelId;
+    if (!targetId || !user) return;
     
-    const key = `lastRead_${user.id}_${currentChannelId}`;
+    const key = `lastRead_${user.id}_${targetId}`;
     const savedLastRead = localStorage.getItem(key);
     setLastReadMessageId(savedLastRead);
-  }, [currentChannelId, user]);
+  }, [isDM, friendId, channelId, user]);
 
   // 标记消息为已读
   const markAsRead = () => {
-    if (!currentChannelId || !user || messages.length === 0) return;
+    const targetId = isDM ? friendId : channelId;
+    if (!targetId || !user || messages.length === 0) return;
     
     const lastMessage = messages[messages.length - 1];
-    const key = `lastRead_${user.id}_${currentChannelId}`;
+    const key = `lastRead_${user.id}_${targetId}`;
     localStorage.setItem(key, lastMessage.id);
     setLastReadMessageId(lastMessage.id);
   };
 
   // 加载消息
   useEffect(() => {
-    if (!currentChannelId) return;
+    const targetId = isDM ? friendId : channelId;
+    if (!targetId) return;
 
     const loadMessages = async () => {
       setIsLoading(true);
       setHasMore(true);
       try {
-        const response = await messageAPI.getChannelMessages(currentChannelId, 50);
+        // 注意: 这里需要根据isDM来调用不同的API
+        // 目前暂时使用频道消息API,后续需要实现私聊消息API
+        const response = await messageAPI.getChannelMessages(targetId, 50);
         const loadedMessages = response.data.data;
         setMessages(loadedMessages);
         setHasMore(loadedMessages.length === 50); // 如果返回50条，可能还有更多
@@ -74,16 +105,17 @@ export default function ChatView() {
     };
 
     loadMessages();
-  }, [currentChannelId]);
+  }, [isDM, friendId, channelId]);
 
   // 加载更多消息（历史记录）
   const loadMoreMessages = async () => {
-    if (!currentChannelId || isLoadingMore || !hasMore || messages.length === 0) return;
+    const targetId = isDM ? friendId : channelId;
+    if (!targetId || isLoadingMore || !hasMore || messages.length === 0) return;
 
     setIsLoadingMore(true);
     try {
       const oldestMessage = messages[0];
-      const response = await messageAPI.getChannelMessages(currentChannelId, 50, oldestMessage.id);
+      const response = await messageAPI.getChannelMessages(targetId, 50, oldestMessage.id);
       const olderMessages = response.data.data;
       
       if (olderMessages.length > 0) {
@@ -136,8 +168,9 @@ export default function ChatView() {
 
   // 监听新消息
   useEffect(() => {
+    const targetId = isDM ? friendId : channelId;
     const handleNewMessage = (message: Message & { channelId?: string }) => {
-      if (message.channelId === currentChannelId) {
+      if (message.channelId === targetId) {
         setMessages((prev) => [...prev, message]);
         setTimeout(() => scrollToBottom(), 100);
       }
@@ -148,7 +181,7 @@ export default function ChatView() {
     return () => {
       socketService.off('channelMessage', handleNewMessage);
     };
-  }, [currentChannelId]);
+  }, [isDM, friendId, channelId]);
 
   // 当消息加载完成或有新消息时，标记为已读
   useEffect(() => {
@@ -164,20 +197,22 @@ export default function ChatView() {
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMessage.trim() || !currentChannelId) return;
+    const targetId = isDM ? friendId : channelId;
+    if (!newMessage.trim() || !targetId) return;
 
-    socketService.sendChannelMessage(currentChannelId, newMessage);
+    socketService.sendChannelMessage(targetId, newMessage);
     setNewMessage('');
     // 发送消息后立即标记为已读
     setTimeout(() => markAsRead(), 500);
   };
 
-  if (!currentChannelId) {
+  // 如果没有选中频道或好友，显示欢迎界面
+  if ((!isDM && !channelId) || (isDM && !friendId)) {
     return (
       <div className="flex-1 flex items-center justify-center bg-discord-gray">
         <div className="text-center">
           <h2 className="text-2xl font-bold text-white mb-2">欢迎来到 Chat & Community</h2>
-          <p className="text-discord-light-gray">选择一个频道开始聊天</p>
+          <p className="text-discord-light-gray">选择一个频道或好友开始聊天</p>
         </div>
       </div>
     );
@@ -185,6 +220,38 @@ export default function ChatView() {
 
   return (
     <div className="flex-1 flex flex-col bg-discord-gray">
+      {/* 标题栏 */}
+      <div className="h-12 bg-discord-darker border-b border-discord-darkest flex items-center px-4 shadow-md">
+        <div className="flex items-center gap-2">
+          {isDM && currentFriend ? (
+            <>
+              <UserAvatar
+                username={currentFriend.username}
+                avatarUrl={currentFriend.avatarUrl}
+                size="sm"
+              />
+              <span className="text-white font-semibold">{currentFriend.username}</span>
+              <div
+                className={`w-2 h-2 rounded-full ${
+                  currentFriend.status === 'ONLINE'
+                    ? 'bg-green-500'
+                    : currentFriend.status === 'IDLE'
+                    ? 'bg-yellow-500'
+                    : currentFriend.status === 'DO_NOT_DISTURB'
+                    ? 'bg-red-500'
+                    : 'bg-gray-500'
+                }`}
+              />
+            </>
+          ) : (
+            <>
+              <span className="text-gray-400">#</span>
+              <span className="text-white font-semibold">{currentChannel?.name || '频道'}</span>
+            </>
+          )}
+        </div>
+      </div>
+
       {/* 消息列表 */}
       <div
         ref={messagesContainerRef}
