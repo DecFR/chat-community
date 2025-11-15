@@ -35,7 +35,8 @@ const upload = multer({
   storage,
   fileFilter,
   limits: {
-    fileSize: Number(process.env.MAX_FILE_SIZE) || 10 * 1024 * 1024, // 10MB
+    // 头像限制最大为 20MiB
+    fileSize: 20 * 1024 * 1024,
   },
 });
 
@@ -50,6 +51,13 @@ const upload = multer({
  * @access  Private
  */
 router.get('/search', authMiddleware, userController.searchUsers);
+
+/**
+ * @route   GET /api/users/check-username
+ * @desc    检查用户名是否可用
+ * @access  Private
+ */
+router.get('/check-username', authMiddleware, userController.checkUsername);
 
 /**
  * @route   GET /api/users/:id
@@ -85,6 +93,13 @@ router.get('/settings', authMiddleware, userController.getSettings);
  * @access  Private
  */
 router.put('/settings', authMiddleware, userController.updateSettings);
+
+/**
+ * @route   PUT /api/users/password
+ * @desc    更新用户密码
+ * @access  Private
+ */
+router.put('/password', authMiddleware, userController.updatePassword);
 
 // 其余路由保持不变
 

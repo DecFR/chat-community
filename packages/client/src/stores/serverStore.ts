@@ -68,8 +68,15 @@ export const useServerStore = create<ServerState>((set, get) => ({
 
   createServer: async (name, description) => {
     try {
-      await serverAPI.createServer({ name, description });
+      const response = await serverAPI.createServer({ name, description });
+      const newServer = response.data.data;
       await get().loadServers();
+      
+      // 创建服务器后立即加入 Socket 房间以接收实时消息
+      const { socketService } = await import('../lib/socket');
+      if (newServer?.id) {
+        socketService.joinServer(newServer.id);
+      }
     } catch (error) {
       console.error('Failed to create server:', error);
       throw error;

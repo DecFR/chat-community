@@ -1,14 +1,19 @@
 import { useServerStore } from '../stores/serverStore';
 import { useAuthStore } from '../stores/authStore';
-import { useNavigate } from 'react-router-dom';
-import { useState, useEffect, useRef } from 'react';
-import { serverRequestAPI } from '../lib/api';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { useUnreadStore } from '../stores/unreadStore';
+import AddServerModal from './AddServerModal';
 
 export default function ServerList() {
-  const { servers, currentServerId, selectServer, createServer, isServersLoaded } = useServerStore();
+   const { servers, currentServerId, selectServer, isServersLoaded } = useServerStore();
   const { user } = useAuthStore();
+  const { channelUnread } = useUnreadStore();
   const navigate = useNavigate();
-  const [isCreating, setIsCreating] = useState(false);
+  const location = useLocation();
+  const adminActive = location.pathname.startsWith('/app/admin');
+  const homeActive = location.pathname === '/app';
+   const [showAddModal, setShowAddModal] = useState(false);
   const hasAutoSelected = useRef(false); // 标记是否已经自动选择过服务器（仅首轮）
   const initialPathRef = useRef<string>(window.location.pathname); // 记录挂载时的URL
 
@@ -53,69 +58,16 @@ export default function ServerList() {
         }
       }
     }
-  }, [isServersLoaded, servers, selectServer]);
-
-  const handleAddServer = async () => {
-    if (isCreating) return;
-
-    if (user?.role === 'ADMIN') {
-      // 管理员直接创建
-      const serverName = prompt('请输入服务器名称：');
-      if (!serverName || !serverName.trim()) return;
-
-      const description = prompt('请输入服务器描述（可选）：');
-
-      try {
-        setIsCreating(true);
-        await createServer(serverName.trim(), description?.trim());
-        alert('服务器创建成功！');
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error && 'response' in error
-          ? ((error as { response?: { data?: { error?: string } } }).response?.data?.error || '创建服务器失败')
-          : '创建服务器失败';
-        alert(errorMessage);
-      } finally {
-        setIsCreating(false);
-      }
-    } else {
-      // 普通用户需要申请
-        const description = prompt('请输入服务器描述（可选）：');
-      
-      const serverName = prompt('请输入服务器名称：');
-      if (!serverName || !serverName.trim()) return;
-      
-      const reason = prompt('请说明创建服务器的理由：');
-      if (!reason || !reason.trim()) {
-        alert('必须提供创建理由');
-        return;
-      }
-      
-      try {
-        setIsCreating(true);
-        await serverRequestAPI.createRequest({
-          name: serverName.trim(),
-          description: description?.trim(),
-          reason: reason.trim(),
-        });
-        alert('申请已提交！\n\n请等待管理员审批。您可以在设置中查看申请状态。');
-      } catch (error: unknown) {
-        const errorMessage = error instanceof Error && 'response' in error
-          ? ((error as { response?: { data?: { error?: string } } }).response?.data?.error || '提交申请失败')
-          : '提交申请失败';
-        alert(errorMessage);
-      } finally {
-        setIsCreating(false);
-      }
-    }
-  };
+    }, [isServersLoaded, servers, selectServer]);
 
   return (
+     <>
     <div className="w-18 bg-discord-darkest flex flex-col items-center py-3 space-y-2 overflow-y-auto scrollbar-thin">
       {/* Home 按钮 */}
       <button
         onClick={handleHomeClick}
         className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${
-          !currentServerId
+          homeActive
             ? 'bg-discord-blue text-white'
             : 'bg-discord-gray text-discord-light-gray hover:bg-discord-blue hover:text-white hover:rounded-2xl'
         }`}
@@ -129,11 +81,13 @@ export default function ServerList() {
       <div className="w-8 h-0.5 bg-discord-gray rounded-full"></div>
 
       {/* 服务器列表 */}
-      {servers.map((server) => (
+      {servers.map((server) => {
+        const unreadTotal = (server.channels || []).reduce((sum, ch) => sum + (channelUnread[ch.id] || 0), 0);
+        return (
         <button
           key={server.id}
           onClick={() => handleServerClick(server.id)}
-          className={`w-12 h-12 rounded-full flex items-center justify-center font-semibold transition-all ${
+          className={`relative w-12 h-12 rounded-full flex items-center justify-center font-semibold transition-all ${
             currentServerId === server.id
               ? 'bg-discord-blue text-white rounded-2xl'
               : 'bg-discord-gray text-white hover:bg-discord-blue hover:rounded-2xl'
@@ -145,14 +99,19 @@ export default function ServerList() {
           ) : (
             <span className="text-lg">{server.name.substring(0, 2).toUpperCase()}</span>
           )}
+          {unreadTotal > 0 && (
+            <span className="absolute -top-1 -right-1 inline-flex min-w-[18px] h-5 px-1 items-center justify-center rounded-full bg-red-500 text-white text-xs shadow">
+              {unreadTotal}
+            </span>
+          )}
         </button>
-      ))}
+      )})}
 
       {/* 添加服务器按钮 */}
       <button
-        onClick={handleAddServer}
+         onClick={() => setShowAddModal(true)}
         className="w-12 h-12 rounded-full bg-discord-gray text-discord-green hover:bg-discord-green hover:text-white hover:rounded-2xl transition-all flex items-center justify-center text-2xl"
-        title="添加服务器"
+         title="创建/查找服务器"
       >
         +
       </button>
@@ -166,7 +125,11 @@ export default function ServerList() {
               selectServer(null!);
               navigate('/app/admin');
             }}
-            className="w-12 h-12 rounded-full bg-discord-gray text-orange-500 hover:bg-orange-600 hover:text-white hover:rounded-2xl transition-all flex items-center justify-center"
+            className={`w-12 h-12 rounded-full transition-all flex items-center justify-center ${
+              adminActive
+                ? 'bg-orange-600 text-white rounded-2xl'
+                : 'bg-discord-gray text-orange-500 hover:bg-orange-600 hover:text-white hover:rounded-2xl'
+            }`}
             title="管理员面板"
           >
             <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
@@ -176,5 +139,8 @@ export default function ServerList() {
         </>
       )}
     </div>
+   
+     <AddServerModal isOpen={showAddModal} onClose={() => setShowAddModal(false)} />
+     </>
   );
 }

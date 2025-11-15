@@ -53,7 +53,27 @@ export const userController = {
 
       const userId = req.user!.id;
       const avatarUrl = `/uploads/${req.file.filename}`;
+
+      // 先取出旧头像，更新成功后再尝试删除
+      const current = await userService.getUserProfile(userId);
+      const oldAvatar = current.avatarUrl;
+
       const user = await userService.updateProfile(userId, { avatarUrl });
+
+      // 删除旧头像文件（仅删除以 avatar- 前缀命名的本地文件，避免误删消息附件或外链）
+      try {
+        if (oldAvatar && oldAvatar !== avatarUrl && oldAvatar.startsWith('/uploads/')) {
+          const fname = oldAvatar.split('/').pop() || '';
+          if (fname.startsWith('avatar-')) {
+            const pathModule = await import('path');
+            const fs = await import('fs/promises');
+            const filePath = pathModule.join(__dirname, '../../uploads', fname);
+            await fs.unlink(filePath).catch(() => {});
+          }
+        }
+      } catch {
+        // 清理失败忽略，不影响主流程
+      }
 
       res.json(successResponse({ avatarUrl: user.avatarUrl }, 'Avatar uploaded successfully'));
     } catch (error: any) {
@@ -102,6 +122,48 @@ export const userController = {
 
       const users = await userService.searchUsers(query, req.user!.id);
       res.json(successResponse(users));
+    } catch (error: any) {
+      res.status(400).json(errorResponse(error.message));
+    }
+  },
+
+  /**
+   * 更新密码
+   */
+  async updatePassword(req: Request, res: Response) {
+    try {
+      const userId = req.user!.id;
+      const { currentPassword, newPassword } = req.body;
+
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json(errorResponse('当前密码和新密码不能为空'));
+      }
+
+      if (newPassword.length < 6) {
+        return res.status(400).json(errorResponse('新密码长度至少为6位'));
+      }
+
+      await userService.updatePassword(userId, currentPassword, newPassword);
+      res.json(successResponse(null, '密码已更新'));
+    } catch (error: any) {
+      res.status(400).json(errorResponse(error.message));
+    }
+  },
+
+  /**
+   * 检查用户名是否可用
+   */
+  async checkUsername(req: Request, res: Response) {
+    try {
+      const username = req.query.username as string;
+      const currentUserId = req.user!.id;
+
+      if (!username || username.trim().length === 0) {
+        return res.status(400).json(errorResponse('用户名不能为空'));
+      }
+
+      const isAvailable = await userService.checkUsernameAvailability(username, currentUserId);
+      res.json(successResponse({ available: isAvailable }));
     } catch (error: any) {
       res.status(400).json(errorResponse(error.message));
     }

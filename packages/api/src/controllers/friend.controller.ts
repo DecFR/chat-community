@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import { friendService } from '../services/friend.service';
 import { successResponse, errorResponse } from '../utils/response';
+import { getIO } from '../socket';
 
 export const friendController = {
   /**
@@ -37,6 +38,19 @@ export const friendController = {
       const friendshipId = req.params.id;
 
       const friendship = await friendService.acceptFriendRequest(userId, friendshipId);
+      
+      // 通过 Socket.IO 通知申请方好友请求已被接受
+      const io = getIO();
+      io.to(`user-${friendship.senderId}`).emit('friendRequestAccepted', {
+        friendshipId: friendship.id,
+        friend: {
+          id: friendship.receiver.id,
+          username: friendship.receiver.username,
+          avatarUrl: friendship.receiver.avatarUrl,
+          status: friendship.receiver.status,
+        },
+      });
+      
       res.json(successResponse(friendship, 'Friend request accepted'));
     } catch (error: any) {
       res.status(400).json(errorResponse(error.message));

@@ -12,7 +12,7 @@ interface UpdateSettingsData {
   lastSelectedServerId?: string | null;
   lastSelectedChannelId?: string | null;
   theme?: 'LIGHT' | 'DARK' | 'SYSTEM';
-  friendRequestPrivacy?: 'EVERYONE' | 'FRIENDS_OF_FRIENDS';
+  friendRequestPrivacy?: 'EVERYONE' | 'FRIENDS_OF_FRIENDS' | 'NONE';
 }
 
 export const userService = {
@@ -178,5 +178,52 @@ export const userService = {
 
     // 将关系附加到返回对象
     return users.map(u => ({ ...u, relationship: relByUser.get(u.id) || 'NONE' }));
+  },
+
+  /**
+   * 更新密码
+   */
+  async updatePassword(userId: string, currentPassword: string, newPassword: string) {
+    const bcrypt = await import('bcryptjs');
+    
+    // 获取用户当前密码
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { password: true },
+    });
+
+    if (!user) {
+      throw new Error('用户不存在');
+    }
+
+    // 验证当前密码
+    const isValid = await bcrypt.compare(currentPassword, user.password);
+    if (!isValid) {
+      throw new Error('当前密码不正确');
+    }
+
+    // 加密新密码
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // 更新密码
+    await prisma.user.update({
+      where: { id: userId },
+      data: { password: hashedPassword },
+    });
+
+    return { success: true };
+  },
+
+  /**
+   * 检查用户名是否可用
+   */
+  async checkUsernameAvailability(username: string, currentUserId: string) {
+    const existingUser = await prisma.user.findUnique({
+      where: { username },
+      select: { id: true },
+    });
+
+    // 如果不存在该用户名，或者该用户名是当前用户自己的，则可用
+    return !existingUser || existingUser.id === currentUserId;
   },
 };

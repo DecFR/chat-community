@@ -34,6 +34,37 @@ export const serverRequestController = {
         reason
       );
 
+      // 通知所有管理员
+      try {
+        const { getIO } = await import('../socket');
+        const io = getIO();
+        
+        // 获取所有管理员
+        const admins = await prisma.user.findMany({
+          where: { role: 'ADMIN' },
+          select: { id: true },
+        });
+
+        // 向每个管理员发送通知
+        admins.forEach((admin) => {
+          io.to(`user-${admin.id}`).emit('notification', {
+            id: `server-request-${request.id}`,
+            type: 'system',
+            title: '新的服务器申请',
+            message: `用户 ${user.username} 申请创建服务器 "${name}"`,
+            data: {
+              requestId: request.id,
+              userId,
+              username: user.username,
+              serverName: name,
+            },
+          });
+        });
+      } catch (notifyError) {
+        console.error('Failed to send notification to admins:', notifyError);
+        // 不影响主流程，继续返回成功
+      }
+
       res.json(successResponse(request, '申请已提交,等待管理员审批'));
     } catch (error: any) {
       res.status(500).json(errorResponse(error.message));
@@ -46,7 +77,14 @@ export const serverRequestController = {
   async getMyRequests(req: Request, res: Response) {
     try {
       const userId = req.user!.id;
-      const requests = serverRequestService.getByUser(userId);
+      const userRole = req.user!.role;
+      const allRequests = serverRequestService.getByUser(userId);
+      
+      // 普通用户只显示已批准的申请,管理员可以看到所有
+      const requests = userRole === 'ADMIN' 
+        ? allRequests 
+        : allRequests.filter(r => r.status === 'APPROVED');
+      
       res.json(successResponse(requests));
     } catch (error: any) {
       res.status(500).json(errorResponse(error.message));
@@ -101,12 +139,13 @@ export const serverRequestController = {
           return res.status(404).json(errorResponse('申请不存在'));
         }
 
-        // 创建服务器(私人服务器,isPublic暂时没有字段,所以所有服务器都是公共的)
+        // 创建服务器(用户申请创建的服务器默认为私有)
         const server = await prisma.server.create({
           data: {
             name: request.name,
             description: request.description,
             ownerId: request.requesterId,
+            isPublic: false, // 用户申请创建的服务器默认为私有
           },
           include: {
             channels: true,
@@ -144,6 +183,31 @@ export const serverRequestController = {
 
       if (!updatedRequest) {
         return res.status(404).json(errorResponse('申请不存在'));
+      }
+
+      // 通知申请者审批结果
+      try {
+        const { getIO } = await import('../socket');
+        const io = getIO();
+        
+        io.to(`user-${updatedRequest.requesterId}`).emit('notification', {
+          id: `server-request-result-${requestId}`,
+          type: approved ? 'server_invite' : 'system',
+          title: approved ? '服务器申请已通过' : '服务器申请被拒绝',
+          message: approved 
+            ? `恭喜！你的服务器 "${updatedRequest.name}" 申请已通过${reviewNote ? '，备注：' + reviewNote : ''}`
+            : `很抱歉，你的服务器 "${updatedRequest.name}" 申请被拒绝${reviewNote ? '，原因：' + reviewNote : ''}`,
+          data: {
+            requestId,
+            serverName: updatedRequest.name,
+            approved,
+            serverId,
+            reviewNote,
+          },
+        });
+      } catch (notifyError) {
+        console.error('Failed to send notification to requester:', notifyError);
+        // 不影响主流程
       }
 
       res.json(successResponse(updatedRequest, approved ? '已批准申请' : '已拒绝申请'));

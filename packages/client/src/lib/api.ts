@@ -55,8 +55,11 @@ export const userAPI = {
     }),
   getSettings: () => api.get('/users/settings'),
   updateSettings: (data: any) => api.put('/users/settings', data),
+  updatePassword: (data: { currentPassword: string; newPassword: string }) => 
+    api.put('/users/password', data),
   // 使用 params 方式确保正确编码
   searchUsers: (query: string) => api.get('/users/search', { params: { q: query } }),
+  checkUsername: (username: string) => api.get('/users/check-username', { params: { username } }),
 };
 
 // 好友 API
@@ -78,6 +81,7 @@ export const serverAPI = {
   createServer: (data: { name: string; description?: string }) =>
     api.post('/servers', data),
   getServers: () => api.get('/servers'),
+  searchServers: (q: string) => api.get('/servers/search', { params: { q } }),
   getServer: (serverId: string) => api.get(`/servers/${serverId}`),
   updateServer: (serverId: string, data: { name?: string; description?: string }) =>
     api.put(`/servers/${serverId}`, data),
@@ -88,6 +92,13 @@ export const serverAPI = {
     api.put(`/servers/${serverId}/channels/${channelId}`, data),
   deleteChannel: (serverId: string, channelId: string) =>
     api.delete(`/servers/${serverId}/channels/${channelId}`),
+  // 加入申请
+  createJoinRequest: (serverId: string, reason?: string) =>
+    api.post(`/servers/${serverId}/join-requests`, { reason }),
+  getJoinRequests: (serverId: string) =>
+    api.get(`/servers/${serverId}/join-requests`),
+  reviewJoinRequest: (serverId: string, requestId: string, data: { approved: boolean; reviewNote?: string }) =>
+    api.post(`/servers/${serverId}/join-requests/${requestId}/review`, data),
 };
 
 // 服务器申请 API
@@ -104,12 +115,16 @@ export const serverRequestAPI = {
 
 // 消息 API
 export const messageAPI = {
-  getChannelMessages: (channelId: string, limit = 50, before?: string) =>
-    api.get(`/messages/channel/${channelId}`, { params: { limit, before } }),
-  getConversationMessages: (conversationId: string, limit = 50, before?: string) =>
-    api.get(`/messages/conversation/${conversationId}`, { params: { limit, before } }),
+  getChannelMessages: (channelId: string, limit = 50, before?: string, after?: string) =>
+    api.get(`/messages/channel/${channelId}`, { params: { limit, before, after } }),
+  getChannelState: (channelId: string) =>
+    api.get(`/messages/channel/${channelId}/state`),
+  getConversationMessages: (conversationId: string, limit = 50, before?: string, after?: string) =>
+    api.get(`/messages/conversation/${conversationId}`, { params: { limit, before, after } }),
   getConversationState: (friendId: string) =>
     api.get(`/messages/conversation/${friendId}/state`),
+  uploadAttachment: (formData: FormData) =>
+    api.post('/messages/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
 };
 
 // 管理员 API
@@ -127,6 +142,24 @@ export const adminAPI = {
     api.patch(`/admin/users/${userId}/role`, { role }),
   // 系统统计
   getStats: () => api.get('/admin/stats'),
+  // 清理消息
+  cleanMessages: (channelId?: string, conversationId?: string) => 
+    api.delete('/admin/messages', { params: { channelId, conversationId } }),
+  // 手动清理未使用头像
+  cleanupAvatars: (maxAgeMs?: number) =>
+    api.post('/admin/maintenance/cleanup-avatars', typeof maxAgeMs === 'number' ? { maxAgeMs } : {}),
+  // 持久化配置：头像清理
+  getAvatarCleanupConfig: () => api.get('/admin/config/cleanup-avatars'),
+  updateAvatarCleanupConfig: (data: { maxAgeMs?: number; intervalMs?: number }) =>
+    api.put('/admin/config/cleanup-avatars', data),
+  // 系统信息
+  getSystemInfo: () => api.get('/admin/system-info'),
+  // 线程池配置
+  getThreadPoolConfig: () => api.get('/admin/config/thread-pool'),
+  updateThreadPoolConfig: (data: { maxThreads?: number }) =>
+    api.put('/admin/config/thread-pool', data),
+  // 管理员通知
+  getAdminNotifications: () => api.get('/admin/notifications'),
 };
 
 // 邀请码 API

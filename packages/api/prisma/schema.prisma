@@ -35,6 +35,7 @@ enum Theme {
 enum PrivacySetting {
   EVERYONE
   FRIENDS_OF_FRIENDS
+  NONE
 }
 
 // 好友状态枚举
@@ -49,6 +50,13 @@ enum ServerRole {
   OWNER
   ADMIN
   MEMBER
+}
+
+// 加入服务器申请状态
+enum JoinRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 // 频道类型枚举
@@ -72,15 +80,19 @@ model User {
   updatedAt DateTime   @updatedAt
 
   // 关联
-  settings              UserSettings?
-  sentFriendRequests    Friendship[]                  @relation("SentFriendRequests")
-  receivedFriendRequests Friendship[]                 @relation("ReceivedFriendRequests")
-  serverMembers         ServerMember[]
-  messages              Message[]
-  conversationsAsUser1  DirectMessageConversation[]   @relation("User1Conversations")
-  conversationsAsUser2  DirectMessageConversation[]   @relation("User2Conversations")
-  conversationStates    UserConversationState[]
-  generatedInviteCodes  UserInviteCode[]
+  settings               UserSettings?
+  sentFriendRequests     Friendship[]                @relation("SentFriendRequests")
+  receivedFriendRequests Friendship[]                @relation("ReceivedFriendRequests")
+  serverMembers          ServerMember[]
+  ownedServers           Server[]                    @relation("ServerOwner")
+  messages               Message[]
+  conversationsAsUser1   DirectMessageConversation[] @relation("User1Conversations")
+  conversationsAsUser2   DirectMessageConversation[] @relation("User2Conversations")
+  conversationStates     UserConversationState[]
+  channelStates          UserChannelState[]
+  generatedInviteCodes   UserInviteCode[]
+  // 新增：加入服务器申请（作为申请人）
+  serverJoinRequests     ServerJoinRequest[]
 
   @@index([username])
   @@index([email])
@@ -126,30 +138,55 @@ model Friendship {
 // ============ 服务器与频道 ============
 
 model Server {
-  id          String         @id @default(cuid())
+  id          String   @id @default(cuid())
   name        String
   description String?
   iconUrl     String?
   ownerId     String
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  owner       User     @relation("ServerOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  isPublic    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   // 关联
   members      ServerMember[]
   channels     Channel[]
   inviteCodes  ServerInviteCode[]
+  joinRequests ServerJoinRequest[]
 
   @@index([ownerId])
+  @@index([isPublic])
+}
+
+// 服务器加入申请
+model ServerJoinRequest {
+  id          String            @id @default(cuid())
+  serverId    String
+  server      Server            @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  applicantId String
+  applicant   User              @relation(fields: [applicantId], references: [id], onDelete: Cascade)
+  status      JoinRequestStatus @default(PENDING)
+  reason      String?
+  reviewNote  String?
+  reviewedAt  DateTime?
+  reviewerId  String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@unique([serverId, applicantId, status])
+  @@index([serverId])
+  @@index([applicantId])
+  @@index([status])
 }
 
 model ServerMember {
-  id        String     @id @default(cuid())
-  serverId  String
-  server    Server     @relation(fields: [serverId], references: [id], onDelete: Cascade)
-  userId    String
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role      ServerRole @default(MEMBER)
-  joinedAt  DateTime   @default(now())
+  id       String     @id @default(cuid())
+  serverId String
+  server   Server     @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role     ServerRole @default(MEMBER)
+  joinedAt DateTime   @default(now())
 
   @@unique([serverId, userId])
   @@index([serverId])
@@ -167,7 +204,8 @@ model Channel {
   updatedAt   DateTime    @updatedAt
 
   // 关联
-  messages Message[]
+  messages   Message[]
+  userStates UserChannelState[]
 
   @@index([serverId])
 }
@@ -175,18 +213,21 @@ model Channel {
 // ============ 消息系统 ============
 
 model Message {
-  id               String    @id @default(cuid())
-  encryptedContent String    @db.Text
+  id               String   @id @default(cuid())
+  encryptedContent String   @db.Text
   authorId         String
-  author           User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  author           User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   // 消息可以属于频道或私聊会话（二选一）
-  channelId                  String?
-  channel                    Channel?                   @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  channelId                   String?
+  channel                     Channel?                   @relation(fields: [channelId], references: [id], onDelete: Cascade)
   directMessageConversationId String?
-  conversation               DirectMessageConversation? @relation(fields: [directMessageConversationId], references: [id], onDelete: Cascade)
+  conversation                DirectMessageConversation? @relation(fields: [directMessageConversationId], references: [id], onDelete: Cascade)
+
+  // 附件
+  attachments MessageAttachment[]
 
   @@index([channelId])
   @@index([directMessageConversationId])
@@ -194,16 +235,40 @@ model Message {
   @@index([createdAt])
 }
 
+// 媒体类型
+enum AttachmentType {
+  IMAGE
+  VIDEO
+  FILE
+}
+
+model MessageAttachment {
+  id         String         @id @default(cuid())
+  messageId  String
+  message    Message        @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  type       AttachmentType
+  url        String
+  filename   String
+  mimeType   String
+  size       Int
+  width      Int?
+  height     Int?
+  durationMs Int?
+  createdAt  DateTime       @default(now())
+
+  @@index([messageId])
+}
+
 // ============ 私聊系统 ============
 
 model DirectMessageConversation {
-  id        String    @id @default(cuid())
+  id        String   @id @default(cuid())
   user1Id   String
-  user1     User      @relation("User1Conversations", fields: [user1Id], references: [id], onDelete: Cascade)
+  user1     User     @relation("User1Conversations", fields: [user1Id], references: [id], onDelete: Cascade)
   user2Id   String
-  user2     User      @relation("User2Conversations", fields: [user2Id], references: [id], onDelete: Cascade)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  user2     User     @relation("User2Conversations", fields: [user2Id], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // 关联
   messages           Message[]
@@ -232,6 +297,25 @@ model UserConversationState {
   @@index([conversationId])
 }
 
+// 频道阅读状态（与私聊状态结构类似）
+model UserChannelState {
+  id        String  @id @default(cuid())
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channelId String
+  channel   Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  // 已读的最后一条消息 ID
+  lastReadMessageId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, channelId])
+  @@index([userId])
+  @@index([channelId])
+}
+
 // ============ 邀请码系统 ============
 
 model UserInviteCode {
@@ -256,4 +340,15 @@ model ServerInviteCode {
 
   @@index([code])
   @@index([serverId])
+}
+
+// ============ 系统配置（持久化） ============
+model AppConfig {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([key])
 }

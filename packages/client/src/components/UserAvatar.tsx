@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 interface UserAvatarProps {
   username: string;
@@ -24,6 +24,8 @@ export const UserAvatar: React.FC<UserAvatarProps> = ({
   size = 'md',
   className = '',
 }) => {
+  const [imageError, setImageError] = useState(false);
+
   // 获取用户名首字符（大写）
   const getInitial = (name: string): string => {
     if (!name || name.length === 0) return '?';
@@ -53,12 +55,34 @@ export const UserAvatar: React.FC<UserAvatarProps> = ({
 
   const sizeClass = sizeClasses[size];
 
-  if (avatarUrl) {
+  // 构建完整的头像URL
+  const getAvatarUrl = (url: string | null | undefined): string | null => {
+    if (!url) return null;
+    // 如果是完整URL，直接返回
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return url;
+    }
+    // 如果是相对路径，补全API_URL
+    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+    const baseUrl = API_URL.replace('/api', ''); // 移除 /api 后缀
+    // 添加时间戳防止缓存
+    const timestamp = new Date().getTime();
+    return `${baseUrl}${url}?t=${timestamp}`;
+  };
+
+  const fullAvatarUrl = getAvatarUrl(avatarUrl);
+
+  if (fullAvatarUrl && !imageError) {
     return (
       <img
-        src={avatarUrl}
+        src={fullAvatarUrl}
         alt={username}
+        crossOrigin="anonymous"
         className={`${sizeClass} rounded-full object-cover flex-shrink-0 ${className}`}
+        onError={() => {
+          console.error('Failed to load avatar:', fullAvatarUrl);
+          setImageError(true);
+        }}
       />
     );
   }

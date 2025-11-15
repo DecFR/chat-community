@@ -7,11 +7,14 @@ import { useState, useEffect } from 'react';
 import FriendsPanel from './FriendsPanel';
 import FriendRequestsPanel from './FriendRequestsPanel';
 import UserSearchModal from './UserSearchModal';
+import { useUnreadStore } from '../stores/unreadStore';
+import ServerManagementModal from './ServerManagementModal';
 
 export default function ChannelList() {
   const { servers, currentServerId, currentChannelId, selectChannel, createChannel, updateChannel, deleteChannel, isLoading } = useServerStore();
   const { friends, removeFriend, loadFriends, loadPendingRequests } = useFriendStore();
   const { user } = useAuthStore();
+  const { channelUnread, dmUnreadByFriend } = useUnreadStore();
   const navigate = useNavigate();
   const [isCreatingChannel, setIsCreatingChannel] = useState(false);
   const [newChannelName, setNewChannelName] = useState('');
@@ -20,6 +23,7 @@ export default function ChannelList() {
   const [contextMenuChannel, setContextMenuChannel] = useState<string | null>(null);
   const [contextMenuFriend, setContextMenuFriend] = useState<string | null>(null);
   const [friendView, setFriendView] = useState<'list' | 'requests' | 'search'>('list');
+  const [showServerManage, setShowServerManage] = useState(false);
 
   const currentServer = servers.find((s) => s.id === currentServerId);
 
@@ -100,11 +104,11 @@ export default function ChannelList() {
   }, [contextMenuChannel, contextMenuFriend]);
 
   // 删除好友
-  const handleRemoveFriend = async (friendId: string, friendName: string) => {
+  const handleRemoveFriend = async (friendshipId: string, friendName: string) => {
     if (!confirm(`确定要删除好友 "${friendName}" 吗？`)) return;
     
     try {
-      await removeFriend(friendId);
+      await removeFriend(friendshipId);
       setContextMenuFriend(null);
       alert('已删除好友');
     } catch (error) {
@@ -114,6 +118,7 @@ export default function ChannelList() {
 
   // 点击好友，打开私聊
   const handleFriendClick = (friendId: string) => {
+    // 打开会话但不清零，进入 ChatView 后按已读条数递减
     navigate(`/app/dm/${friendId}`);
   };
 
@@ -215,6 +220,12 @@ export default function ChannelList() {
                         {friend.username}
                       </span>
                     </div>
+                    {/* 未读徽标 */}
+                    {(dmUnreadByFriend[friend.id] || 0) > 0 && (
+                      <span className="ml-2 inline-flex min-w-[18px] h-5 px-1 items-center justify-center rounded-full bg-red-500 text-white text-xs">
+                        {dmUnreadByFriend[friend.id]}
+                      </span>
+                    )}
                     <div
                       onClick={(e) => {
                         e.stopPropagation();
@@ -230,7 +241,7 @@ export default function ChannelList() {
                   {contextMenuFriend === friend.id && (
                     <div className="absolute right-2 top-10 bg-discord-darkest rounded shadow-lg py-1 z-10 min-w-[120px]">
                       <button
-                        onClick={() => handleRemoveFriend(friend.id, friend.username)}
+                        onClick={() => handleRemoveFriend(friend.friendshipId, friend.username)}
                         className="w-full px-3 py-2 text-left text-red-400 hover:bg-red-500 hover:text-white text-sm transition-colors"
                       >
                         删除好友
@@ -301,15 +312,26 @@ export default function ChannelList() {
 
   return (
     <div className="w-60 bg-discord-darker flex flex-col">
-      <div className="h-12 border-b border-discord-darkest flex items-center px-4 font-semibold text-white shadow-md">
-        {currentServer?.name || '服务器'}
+      <div className="h-12 border-b border-discord-darkest flex items-center justify-between px-4 font-semibold text-white shadow-md">
+        <span className="truncate" title={currentServer?.name}>{currentServer?.name || '服务器'}</span>
+        {(user?.role === 'ADMIN' || currentServer.ownerId === user?.id) && (
+          <button
+            onClick={() => setShowServerManage(true)}
+            className="p-1 rounded hover:bg-discord-darkest"
+            title="服务器管理"
+          >
+            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978.908.221 1.487 1.377.947 2.263-.836 1.372.734 2.942 2.106 2.106.886-.54 2.042-.061 2.287.947.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106-.54-.886-.061-2.042.947-2.287 1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.533 1.533 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
+            </svg>
+          </button>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto scrollbar-thin">
         {/* 频道列表 */}
         <div className="p-2 space-y-1">
           <div className="text-xs font-semibold text-gray-400 px-2 py-1 flex items-center justify-between">
-            <span>文字频道</span>
+            <span>频道</span>
             <button
               onClick={() => setIsCreatingChannel(true)}
               className="hover:text-white transition-colors"
@@ -401,6 +423,12 @@ export default function ChannelList() {
                       <span className="text-gray-400">#</span>
                       <span>{channel.name}</span>
                     </div>
+                    {/* 未读徽标 */}
+                    {(channelUnread[channel.id] || 0) > 0 && (
+                      <span className="ml-2 inline-flex min-w-[18px] h-5 px-1 items-center justify-center rounded-full bg-red-500 text-white text-xs">
+                        {channelUnread[channel.id]}
+                      </span>
+                    )}
                     {(user?.role === 'ADMIN' || currentServer.ownerId === user?.id) && (
                       <div
                         onClick={(e) => {
@@ -458,6 +486,13 @@ export default function ChannelList() {
           <div className="text-xs text-gray-400">在线</div>
         </div>
       </div>
+      {showServerManage && (
+        <ServerManagementModal
+          isOpen={showServerManage}
+          onClose={() => setShowServerManage(false)}
+          serverId={currentServer.id}
+        />
+      )}
     </div>
   );
 }

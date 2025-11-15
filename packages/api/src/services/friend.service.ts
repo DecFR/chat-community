@@ -9,6 +9,43 @@ export const friendService = {
       throw new Error('Cannot send friend request to yourself');
     }
 
+    // 检查接收者的隐私设置
+    const receiverSettings = await prisma.userSettings.findUnique({
+      where: { userId: receiverId },
+      select: { friendRequestPrivacy: true },
+    });
+
+    // 如果接收者关闭了好友请求
+    if (receiverSettings?.friendRequestPrivacy === 'NONE') {
+      throw new Error('该用户已关闭好友请求');
+    }
+
+    // 如果接收者设置为"好友的好友"，检查是否有共同好友
+    if (receiverSettings?.friendRequestPrivacy === 'FRIENDS_OF_FRIENDS') {
+      const mutualFriends = await prisma.friendship.findFirst({
+        where: {
+          AND: [
+            {
+              OR: [
+                { senderId: senderId, status: 'ACCEPTED' },
+                { receiverId: senderId, status: 'ACCEPTED' },
+              ],
+            },
+            {
+              OR: [
+                { senderId: receiverId, status: 'ACCEPTED' },
+                { receiverId: receiverId, status: 'ACCEPTED' },
+              ],
+            },
+          ],
+        },
+      });
+
+      if (!mutualFriends) {
+        throw new Error('该用户仅接受好友的好友发送请求');
+      }
+    }
+
     // 检查是否已经是好友或有待处理的请求
     const existing = await prisma.friendship.findFirst({
       where: {
@@ -120,6 +157,7 @@ export const friendService = {
       throw new Error('Not authorized');
     }
 
+    // 直接删除好友申请记录
     await prisma.friendship.delete({
       where: { id: friendshipId },
     });

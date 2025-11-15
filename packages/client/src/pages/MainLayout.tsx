@@ -4,6 +4,9 @@ import { useAuthStore } from '../stores/authStore';
 import { useServerStore } from '../stores/serverStore';
 import { useFriendStore } from '../stores/friendStore';
 import { socketService } from '../lib/socket';
+import { useUnreadStore } from '../stores/unreadStore';
+import { notifyDM } from '../stores/notificationStore';
+import { messageAPI } from '../lib/api';
 import ServerList from '../components/ServerList';
 import ChannelList from '../components/ChannelList';
 import MemberList from '../components/MemberList';
@@ -15,8 +18,63 @@ export default function MainLayout() {
   const { user, isAuthenticated, loadUser } = useAuthStore();
   const { isServersLoaded, loadServers, selectServer } = useServerStore();
   const location = useLocation();
-  const { loadFriends, loadPendingRequests, updateFriendStatus } = useFriendStore();
+  const { loadFriends, loadPendingRequests, updateFriendStatus, friends } = useFriendStore();
   const [showSettings, setShowSettings] = useState(false);
+  const { incrementChannel, incrementDM, setChannelCount, setDMCount } = useUnreadStore();
+
+  // 初始未读加载（基于 lastReadMessageId 差集）
+  useEffect(() => {
+    const run = async () => {
+      if (!user) return;
+      // 需要服务器和好友列表
+      // 等待服务器加载完成
+      if (!isServersLoaded) return;
+      try {
+        // 频道未读
+        const channels = (useServerStore.getState().servers || []).flatMap((s) => s.channels || []);
+        await Promise.all(
+          channels.map(async (ch) => {
+            try {
+              const stateRes = await messageAPI.getChannelState(ch.id);
+              const lastRead = stateRes.data?.data?.lastReadMessageId as string | undefined;
+              if (!lastRead) {
+                // 没有已读状态，默认 0，避免噪音
+                setChannelCount(ch.id, 0);
+                return;
+              }
+              const msgsRes = await messageAPI.getChannelMessages(ch.id, 100, undefined, lastRead);
+              const msgs = msgsRes.data?.data || [];
+              const count = msgs.filter((m: any) => m.authorId !== user.id).length;
+              setChannelCount(ch.id, count);
+            } catch {}
+          })
+        );
+
+        // 私聊未读
+        const friends = (useFriendStore.getState().friends || []);
+        await Promise.all(
+          friends.map(async (f) => {
+            try {
+              const stateRes = await messageAPI.getConversationState(f.id);
+              const convId = stateRes.data?.data?.conversationId as string | undefined;
+              const lastRead = stateRes.data?.data?.lastReadMessageId as string | undefined;
+              if (!convId || !lastRead) {
+                setDMCount(f.id, 0);
+                return;
+              }
+              const msgsRes = await messageAPI.getConversationMessages(convId, 100, undefined, lastRead);
+              const msgs = msgsRes.data?.data || [];
+              const count = msgs.filter((m: any) => m.authorId !== user.id).length;
+              setDMCount(f.id, count);
+            } catch {}
+          })
+        );
+      } catch (e) {
+        console.error('Failed to load initial unread counts', e);
+      }
+    };
+    run();
+  }, [user, isServersLoaded, friends.length]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -32,16 +90,71 @@ export default function MainLayout() {
     loadFriends();
     loadPendingRequests();
 
+    // 加入所有服务器的 Socket 房间
+    const joinAllServers = () => {
+      const { servers } = useServerStore.getState();
+      servers.forEach((server) => {
+        socketService.joinServer(server.id);
+      });
+    };
+    
+    // 延迟加入房间，确保 servers 已加载
+    const timer = setTimeout(() => {
+      if (isServersLoaded) {
+        joinAllServers();
+      }
+    }, 500);
+
     // 监听好友状态更新
     const handleFriendStatusUpdate = (data: any) => {
       updateFriendStatus(data.userId, data.status);
     };
     socketService.on('friendStatusUpdate', handleFriendStatusUpdate);
 
+    // 监听好友请求被接受
+    const handleFriendRequestAccepted = () => {
+      // 重新加载好友列表
+      loadFriends();
+    };
+    socketService.on('friendRequestAccepted', handleFriendRequestAccepted);
+
     return () => {
+      clearTimeout(timer);
       socketService.off('friendStatusUpdate', handleFriendStatusUpdate);
+      socketService.off('friendRequestAccepted', handleFriendRequestAccepted);
     };
   }, [isAuthenticated, navigate, loadUser, isServersLoaded, loadServers, loadFriends, loadPendingRequests, updateFriendStatus]);
+
+  // 监听服务器和频道变化,实时更新
+  useEffect(() => {
+    if (!isAuthenticated || !user) return;
+
+    const handleServerUpdate = () => {
+      console.log('[MainLayout] Server updated, reloading...');
+      loadServers();
+    };
+
+    const handleChannelUpdate = () => {
+      console.log('[MainLayout] Channel updated, reloading...');
+      loadServers();
+    };
+
+    socketService.on('serverCreated', handleServerUpdate);
+    socketService.on('serverUpdated', handleServerUpdate);
+    socketService.on('serverDeleted', handleServerUpdate);
+    socketService.on('channelCreated', handleChannelUpdate);
+    socketService.on('channelUpdated', handleChannelUpdate);
+    socketService.on('channelDeleted', handleChannelUpdate);
+
+    return () => {
+      socketService.off('serverCreated', handleServerUpdate);
+      socketService.off('serverUpdated', handleServerUpdate);
+      socketService.off('serverDeleted', handleServerUpdate);
+      socketService.off('channelCreated', handleChannelUpdate);
+      socketService.off('channelUpdated', handleChannelUpdate);
+      socketService.off('channelDeleted', handleChannelUpdate);
+    };
+  }, [isAuthenticated, user, loadServers]);
 
   // 路由守卫：当路径为 /app（主页）时，强制清空服务器/频道选择，避免任何副作用重新选中
   useEffect(() => {
@@ -49,6 +162,56 @@ export default function MainLayout() {
       selectServer('');
     }
   }, [location.pathname, selectServer]);
+
+  // 全局监听新消息以更新未读计数
+  useEffect(() => {
+    if (!user) return;
+
+    const getActiveTarget = () => {
+      const path = location.pathname;
+      if (path.startsWith('/app/channel/')) {
+        const id = path.split('/').pop()!;
+        return { type: 'channel' as const, id };
+      }
+      if (path.startsWith('/app/dm/')) {
+        const id = path.split('/').pop()!;
+        return { type: 'dm' as const, id };
+      }
+      return { type: 'none' as const, id: '' };
+    };
+
+    const handleChannelMessage = (msg: any) => {
+      // 自己发送的不计未读
+      if (msg.authorId === user.id) return;
+      const active = getActiveTarget();
+      if (!(active.type === 'channel' && active.id === msg.channelId)) {
+        if (msg.channelId) incrementChannel(msg.channelId);
+      }
+    };
+
+    const handleDirectMessage = (msg: any) => {
+      // 自己发送的不计未读
+      if (msg.authorId === user.id) return;
+      const active = getActiveTarget();
+      // 在 DM 页时，路由最后一段即为对方的 userId
+      const friendId = msg.authorId;
+      if (!(active.type === 'dm' && active.id === friendId)) {
+        incrementDM(friendId);
+        const hasAttachment = Array.isArray(msg?.attachments) && msg.attachments.length > 0;
+        const hint = hasAttachment ? ' [附件]' : '';
+        const preview = (msg?.content || '').toString().slice(0, 80) + hint;
+        notifyDM(msg?.author?.username || '好友', preview, friendId);
+      }
+    };
+
+    socketService.on('channelMessage', handleChannelMessage);
+    socketService.on('directMessage', handleDirectMessage);
+
+    return () => {
+      socketService.off('channelMessage', handleChannelMessage);
+      socketService.off('directMessage', handleDirectMessage);
+    };
+  }, [location.pathname, user, incrementChannel, incrementDM]);
 
   // 应用用户的主题设置
   useEffect(() => {
@@ -77,8 +240,8 @@ export default function MainLayout() {
       {/* 最左侧：服务器列表 */}
       <ServerList />
 
-      {/* 中间：频道/好友列表 */}
-      <ChannelList />
+      {/* 中间：频道/好友列表（管理员面板时隐藏以扩大空间） */}
+      {!(location.pathname.startsWith('/app/admin')) && <ChannelList />}
 
       {/* 主内容区域 */}
       <div className="flex-1 flex flex-col min-h-0 min-w-0">

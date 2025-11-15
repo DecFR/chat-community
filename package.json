@@ -4,7 +4,8 @@
   "private": true,
   "description": "全栈实时聊天平台 - Chat & Community",
   "scripts": {
-    "dev": "pnpm --parallel -r dev",
+    "setup:db": "pnpm -F @chat-community/api prisma:generate && pnpm -F @chat-community/api prisma:migrate",
+    "dev": "pnpm run setup:db && pnpm --parallel -r dev",
     "build": "pnpm -r build",
     "install:all": "pnpm install && pnpm -r install"
   },

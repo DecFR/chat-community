@@ -48,18 +48,23 @@ class SocketService {
   }
 
   // 发送直接消息
-  sendDirectMessage(receiverId: string, content: string) {
-    this.socket?.emit('sendDirectMessage', { receiverId, content });
+  sendDirectMessage(receiverId: string, content: string, attachments?: any[]) {
+    this.socket?.emit('sendDirectMessage', { receiverId, content, attachments });
   }
 
   // 发送频道消息
-  sendChannelMessage(channelId: string, content: string) {
-    this.socket?.emit('sendChannelMessage', { channelId, content });
+  sendChannelMessage(channelId: string, content: string, attachments?: any[]) {
+    this.socket?.emit('sendChannelMessage', { channelId, content, attachments });
   }
 
   // 标记会话为已读
   markConversationAsRead(conversationId: string, messageId: string) {
     this.socket?.emit('markConversationAsRead', { conversationId, messageId });
+  }
+
+  // 标记频道为已读
+  markChannelAsRead(channelId: string, messageId: string) {
+    this.socket?.emit('markChannelAsRead', { channelId, messageId });
   }
 
   // 发送正在输入事件
@@ -70,6 +75,16 @@ class SocketService {
   // 更新用户状态
   updateStatus(status: string) {
     this.socket?.emit('updateStatus', status);
+  }
+
+  // 加入服务器房间
+  joinServer(serverId: string) {
+    this.socket?.emit('joinServer', { serverId });
+  }
+
+  // 离开服务器房间
+  leaveServer(serverId: string) {
+    this.socket?.emit('leaveServer', { serverId });
   }
 
   // 监听事件

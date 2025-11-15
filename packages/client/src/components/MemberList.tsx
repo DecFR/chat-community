@@ -2,6 +2,7 @@ import { useServerStore } from '../stores/serverStore';
 import { useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { UserAvatar } from './UserAvatar';
+import { socketService } from '../lib/socket';
 
 interface Member {
   id: string;
@@ -41,20 +42,46 @@ export default function MemberList() {
     };
 
     loadMembers();
+
+    // 监听服务器成员更新事件
+    const handleMemberUpdate = (data: any) => {
+      // 只处理当前服务器的成员更新
+      if (data.serverId !== currentServerId) return;
+
+      setMembers((prevMembers) => {
+        const memberIndex = prevMembers.findIndex((m) => m.id === data.userId);
+        
+        if (memberIndex >= 0) {
+          // 更新现有成员的状态
+          const updatedMembers = [...prevMembers];
+          updatedMembers[memberIndex] = {
+            ...updatedMembers[memberIndex],
+            status: data.status,
+          };
+          return updatedMembers;
+        } else if (data.action === 'online') {
+          // 如果是新上线的成员，重新加载成员列表
+          loadMembers();
+        }
+        
+        return prevMembers;
+      });
+    };
+
+    socketService.on('serverMemberUpdate', handleMemberUpdate);
+
+    return () => {
+      socketService.off('serverMemberUpdate', handleMemberUpdate);
+    };
   }, [currentServerId]);
 
-  // 在管理员面板页面不显示成员列表
-  if (location.pathname.includes('/admin')) {
+  // 只在频道页面显示成员列表
+  if (!location.pathname.includes('/app/channel/')) {
     return null;
   }
 
-  // 在主页（好友面板）和私聊页面不显示成员列表
-  if (location.pathname === '/app' || location.pathname === '/app/' || location.pathname.includes('/dm/')) {
-    return null;
-  }
-
-  // 如果没有选中服务器，不显示
-  if (!currentServerId) {
+  // 如果没有选中服务器或频道，不显示
+  if (!currentServerId || !currentChannelId) {
     return null;
   }
 

@@ -7,6 +7,42 @@ const router = Router();
 router.use(authMiddleware);
 
 /**
+ * @route   GET /api/servers/search
+ * @desc    搜索公开服务器（按名称或描述，模糊匹配）
+ * @access  Private
+ */
+router.get('/search', async (req, res) => {
+  try {
+    const q = (req.query.q as string | undefined)?.trim();
+    const prisma = (await import('../utils/prisma')).default;
+
+    const where: any = {
+      isPublic: true, // 只搜索公开服务器
+    };
+
+    if (q) {
+      where.OR = [
+        { name: { contains: q, mode: 'insensitive' } },
+        { description: { contains: q, mode: 'insensitive' } },
+      ];
+    }
+
+    const servers = await prisma.server.findMany({
+      where,
+      include: {
+        _count: { select: { members: true, channels: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+
+    res.json({ success: true, data: servers });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
  * @route   POST /api/servers
  * @desc    创建新服务器
  * @access  Private
@@ -76,14 +112,29 @@ router.post('/', async (req, res) => {
 
 /**
  * @route   GET /api/servers
- * @desc    获取所有服务器
+ * @desc    获取用户可见的服务器（公开服务器 + 用户已加入的私有服务器）
  * @access  Private
  */
 router.get('/', async (req, res) => {
   try {
+    const userId = req.user!.id;
     const prisma = (await import('../utils/prisma')).default;
 
+    // 获取用户已加入的服务器ID列表
+    const userMemberships = await prisma.serverMember.findMany({
+      where: { userId },
+      select: { serverId: true },
+    });
+    const userServerIds = userMemberships.map(m => m.serverId);
+
+    // 查询: 公开服务器 OR 用户已加入的服务器
     const servers = await prisma.server.findMany({
+      where: {
+        OR: [
+          { isPublic: true },
+          { id: { in: userServerIds } },
+        ],
+      },
       include: {
         channels: true,
         owner: true,
@@ -325,6 +376,130 @@ router.delete('/:serverId/channels/:channelId', async (req, res) => {
     });
 
     res.json({ success: true, message: 'Channel deleted successfully' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * @route   POST /api/servers/:id/join-requests
+ * @desc    提交加入服务器申请（审核者为服务器创建者/owner）
+ * @access  Private
+ */
+router.post('/:id/join-requests', async (req, res) => {
+  try {
+    const serverId = req.params.id;
+    const userId = req.user!.id;
+    const { reason } = req.body as { reason?: string };
+    const prisma = (await import('../utils/prisma')).default;
+
+    // 检查服务器存在
+    const server = await prisma.server.findUnique({ where: { id: serverId } });
+    if (!server) return res.status(404).json({ success: false, error: '服务器不存在' });
+
+    // 已是成员
+    const exists = await prisma.serverMember.findUnique({
+      where: { serverId_userId: { serverId, userId } },
+    });
+    if (exists) return res.status(400).json({ success: false, error: '你已在该服务器中' });
+
+    // 是否已有待处理申请
+    const pending = await prisma.serverJoinRequest.findFirst({
+      where: { serverId, applicantId: userId, status: 'PENDING' },
+    });
+    if (pending) return res.status(400).json({ success: false, error: '已提交过申请，请耐心等待审核' });
+
+    const created = await prisma.serverJoinRequest.create({
+      data: {
+        serverId,
+        applicantId: userId,
+        reason: reason?.trim() || null,
+      },
+      include: {
+        applicant: {
+          select: { id: true, username: true, avatarUrl: true },
+        },
+      },
+    });
+
+    // 通知服务器创建者有新的加入申请
+    const { getIO } = await import('../socket');
+    const io = getIO();
+    io.to(`user-${server.ownerId}`).emit('serverJoinRequest', {
+      serverId,
+      serverName: server.name,
+      request: created,
+    });
+
+    res.json({ success: true, data: created });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * @route   GET /api/servers/:id/join-requests
+ * @desc    服务器所有者查看加入申请列表
+ * @access  Private (owner-only)
+ */
+router.get('/:id/join-requests', async (req, res) => {
+  try {
+    const serverId = req.params.id;
+    const userId = req.user!.id;
+    const prisma = (await import('../utils/prisma')).default;
+
+    const server = await prisma.server.findUnique({ where: { id: serverId } });
+    if (!server) return res.status(404).json({ success: false, error: '服务器不存在' });
+    if (server.ownerId !== userId) return res.status(403).json({ success: false, error: '无权查看该服务器的申请' });
+
+    const list = await prisma.serverJoinRequest.findMany({
+      where: { serverId },
+      orderBy: { createdAt: 'desc' },
+      include: { applicant: { select: { id: true, username: true, avatarUrl: true } } },
+    });
+    res.json({ success: true, data: list });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+/**
+ * @route   POST /api/servers/:serverId/join-requests/:requestId/review
+ * @desc    服务器所有者审核加入申请（approve/reject）
+ * @access  Private (owner-only)
+ */
+router.post('/:serverId/join-requests/:requestId/review', async (req, res) => {
+  try {
+    const { serverId, requestId } = req.params as { serverId: string; requestId: string };
+    const { approved, reviewNote } = req.body as { approved: boolean; reviewNote?: string };
+    const userId = req.user!.id;
+    const prisma = (await import('../utils/prisma')).default;
+
+    const server = await prisma.server.findUnique({ where: { id: serverId } });
+    if (!server) return res.status(404).json({ success: false, error: '服务器不存在' });
+    if (server.ownerId !== userId) return res.status(403).json({ success: false, error: '无权审核该服务器的申请' });
+
+    const reqRec = await prisma.serverJoinRequest.findUnique({ where: { id: requestId } });
+    if (!reqRec || reqRec.serverId !== serverId) return res.status(404).json({ success: false, error: '申请不存在' });
+    if (reqRec.status !== 'PENDING') return res.status(400).json({ success: false, error: '该申请已处理' });
+
+    if (approved) {
+      // 同意：创建成员，更新申请
+      await prisma.$transaction([
+        prisma.serverMember.create({ data: { serverId, userId: reqRec.applicantId, role: 'MEMBER' } }),
+        prisma.serverJoinRequest.update({
+          where: { id: requestId },
+          data: { status: 'APPROVED', reviewNote: reviewNote || null, reviewedAt: new Date(), reviewerId: userId },
+        }),
+      ]);
+    } else {
+      await prisma.serverJoinRequest.update({
+        where: { id: requestId },
+        data: { status: 'REJECTED', reviewNote: reviewNote || null, reviewedAt: new Date(), reviewerId: userId },
+      });
+    }
+
+    res.json({ success: true });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });
   }
