@@ -40,3 +40,8 @@ lerna-debug.log*
 # Uploads
 uploads/*
 !uploads/.gitkeep
+
+# Ignore package artifacts
+/packages/*/node_modules/
+/packages/*/dist/
+/packages/*/pnpm-lock.yaml
