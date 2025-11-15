@@ -1,9 +1,9 @@
 import { Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
 
-import { friendService } from '../services/friend.service';
-import { getIO } from '../socket';
-import { successResponse, errorResponse } from '../utils/response';
+import { friendService } from '../services/friend.service.js';
+import { getIO } from '../socket/index.js';
+import { successResponse, errorResponse } from '../utils/response.js';
 
 export const friendController = {
   /**

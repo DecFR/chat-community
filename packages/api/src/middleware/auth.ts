@@ -3,7 +3,7 @@ import { NextFunction, Request, Response } from 'express';
 import passport from 'passport';
 import { ExtractJwt, Strategy as JwtStrategy, StrategyOptions } from 'passport-jwt';
 
-import prisma from '../utils/prisma';
+import prisma from '../utils/prisma.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 

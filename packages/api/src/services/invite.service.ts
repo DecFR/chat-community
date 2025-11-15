@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid';
 
-import prisma from '../utils/prisma';
+import prisma from '../utils/prisma.js';
 
 export const inviteService = {
   /**
@@ -145,9 +145,9 @@ export const inviteService = {
     // 检查用户是否已经是成员
     const existingMember = await prisma.serverMember.findUnique({
       where: {
-        userId_serverId: {
-          userId,
+        serverId_userId: {
           serverId: inviteCode.server.id,
+          userId,
         },
       },
     });

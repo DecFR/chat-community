@@ -4,9 +4,9 @@ import { UserStatus, Friendship } from '@prisma/client';
 import jwt from 'jsonwebtoken';
 import { Server, Socket } from 'socket.io';
 
-import { encrypt, decrypt } from '../utils/encryption';
-import logger from '../utils/logger';
-import prisma from '../utils/prisma';
+import { encrypt, decrypt } from '../utils/encryption.js';
+import logger from '../utils/logger.js';
+import prisma from '../utils/prisma.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
@@ -43,6 +43,10 @@ interface MarkChannelReadData {
 }
 
 let io: Server;
+// 简单的消息发送速率限制：记录用户上次发送时间戳
+const lastMessageAt = new Map<string, number>();
+// 最小发送间隔（毫秒）
+const MIN_INTERVAL_MS = 700;
 
 export function initializeSocket(httpServer: HttpServer) {
   io = new Server(httpServer, {
@@ -65,8 +69,43 @@ export function initializeSocket(httpServer: HttpServer) {
       socket.userId = decoded.id;
       socket.username = decoded.username;
 
+      // 验证会话是否存在且有效
+      const session = await prisma.userSession.findUnique({
+        where: { token },
+      });
+
+      if (!session) {
+        return next(new Error('Session expired or invalid'));
+      }
+
+      if (session.expiresAt < new Date()) {
+        await prisma.userSession.delete({ where: { id: session.id } });
+        return next(new Error('Session expired'));
+      }
+
+      // 检查是否有其他活跃的Socket连接（单点登录控制）
+      if (session.socketId && session.socketId !== socket.id) {
+        // 通知旧的连接被踢出
+        io.to(`user-${socket.userId}`).emit('forceLogout', {
+          reason: 'new_login',
+          message: '您的账号在其他设备登录',
+        });
+        
+        logger.info(`User ${socket.username} logged in from new device, kicking out old session`);
+      }
+
+      // 更新会话的Socket ID和活跃时间
+      await prisma.userSession.update({
+        where: { id: session.id },
+        data: {
+          socketId: socket.id,
+          lastActiveAt: new Date(),
+        },
+      });
+
       next();
-    } catch {
+    } catch (error) {
+      logger.error('Socket authentication error:', error);
       next(new Error('Authentication error'));
     }
   });
@@ -88,21 +127,35 @@ export function initializeSocket(httpServer: HttpServer) {
     await notifyFriendsStatus(socket.userId!, 'ONLINE');
 
     // 加入所有服务器房间(包括成员服务器和公共服务器)
-    const servers = await prisma.server.findMany({
-      select: {
-        id: true,
-      },
+    // 优化：仅加入当前用户已加入的服务器房间，避免规模增大时无关房间占用内存
+    const memberships: { serverId: string }[] = await prisma.serverMember.findMany({
+      where: { userId: socket.userId },
+      select: { serverId: true },
     });
-
-    servers.forEach((server: { id: string }) => {
-      socket.join(`server-${server.id}`);
+    
+    // 立即加入所有服务器房间，确保用户能接收到频道消息
+    memberships.forEach((m) => {
+      socket.join(`server-${m.serverId}`);
+      logger.debug(`User ${socket.username} auto-joined server room: server-${m.serverId}`);
     });
+    
+    logger.info(`User ${socket.username} joined ${memberships.length} server rooms`);
 
     // 通知所有服务器成员列表更新
     const userServers = await prisma.serverMember.findMany({
       where: { userId: socket.userId },
       select: { serverId: true },
     });
+
+    for (const { serverId } of userServers) {
+      io.to(`server-${serverId}`).emit('serverMemberUpdate', {
+        serverId,
+        userId: socket.userId,
+        username: socket.username,
+        status: 'ONLINE',
+        action: 'online',
+      });
+    }
 
     for (const { serverId } of userServers) {
       io.to(`server-${serverId}`).emit('serverMemberUpdate', {
@@ -121,6 +174,15 @@ export function initializeSocket(httpServer: HttpServer) {
 
         if (!receiverId) {
           socket.emit('error', { message: 'Receiver ID is required' });
+          return;
+        }
+
+        // 速率限制检查
+        const now = Date.now();
+        const lastAt = lastMessageAt.get(socket.userId!);
+        if (lastAt && now - lastAt < MIN_INTERVAL_MS) {
+          const waitMs = MIN_INTERVAL_MS - (now - lastAt);
+            socket.emit('messageRateLimited', { waitMs });
           return;
         }
 
@@ -190,6 +252,7 @@ export function initializeSocket(httpServer: HttpServer) {
         // 发送给发送者和接收者
         io.to(`user-${socket.userId}`).emit('directMessage', decryptedMessage);
         io.to(`user-${receiverId}`).emit('directMessage', decryptedMessage);
+        lastMessageAt.set(socket.userId!, now);
       } catch (error) {
         logger.error('Error sending direct message:', { error });
         socket.emit('error', { message: 'Failed to send message' });
@@ -210,6 +273,8 @@ export function initializeSocket(httpServer: HttpServer) {
         logger.debug(`User ${socket.username} left server room: server-${data.serverId}`);
       }
     });
+
+    // 加入申请批准后客户端会调用 joinServer，这里不处理，只保持房间结构轻量
 
     // 加入/离开频道房间（用于 typing 等实时事件）
     socket.on('joinChannel', (data: { channelId?: string }) => {
@@ -244,6 +309,15 @@ export function initializeSocket(httpServer: HttpServer) {
 
         if (!channelId) {
           socket.emit('error', { message: 'Channel ID is required' });
+          return;
+        }
+
+        // 速率限制检查
+        const now = Date.now();
+        const lastAt = lastMessageAt.get(socket.userId!);
+        if (lastAt && now - lastAt < MIN_INTERVAL_MS) {
+          const waitMs = MIN_INTERVAL_MS - (now - lastAt);
+          socket.emit('messageRateLimited', { waitMs });
           return;
         }
 
@@ -298,6 +372,9 @@ export function initializeSocket(httpServer: HttpServer) {
 
         // 广播到服务器房间
         io.to(`server-${message.channel?.serverId}`).emit('channelMessage', decryptedMessage);
+        // 额外发给发送者的个人房间，避免未加入服务器房间时看不到自己的消息
+        io.to(`user-${socket.userId}`).emit('channelMessage', decryptedMessage);
+        lastMessageAt.set(socket.userId!, now);
       } catch (error) {
         logger.error('Error sending channel message:', { error });
         socket.emit('error', { message: 'Failed to send message' });
@@ -394,6 +471,17 @@ export function initializeSocket(httpServer: HttpServer) {
     // 断开连接
     socket.on('disconnect', async () => {
       logger.info(`User disconnected: ${socket.username} (${socket.userId})`);
+
+      // 清除会话中的Socket ID
+      await prisma.userSession.updateMany({
+        where: {
+          userId: socket.userId!,
+          socketId: socket.id,
+        },
+        data: {
+          socketId: null,
+        },
+      });
 
       // 更新用户状态为离线
       await prisma.user.update({

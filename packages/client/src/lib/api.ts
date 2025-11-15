@@ -89,6 +89,7 @@ export const serverAPI = {
   updateServer: (serverId: string, data: { name?: string; description?: string; isPublic?: boolean }) =>
     api.put(`/servers/${serverId}`, data),
   deleteServer: (serverId: string) => api.delete(`/servers/${serverId}`),
+  leaveServer: (serverId: string) => api.delete(`/servers/${serverId}/leave`),
   createChannel: (serverId: string, data: { name: string; description?: string; type?: string }) =>
     api.post(`/servers/${serverId}/channels`, data),
   updateChannel: (serverId: string, channelId: string, data: { name?: string; description?: string }) =>
@@ -108,7 +109,7 @@ export const serverAPI = {
 export const serverRequestAPI = {
   createRequest: (data: { name: string; description?: string; reason: string }) =>
     api.post('/server-requests', data),
-  getMyRequests: () => api.get('/server-requests/my'),
+  getMyRequests: () => api.get('/servers/my-join-requests'),
   getAllRequests: () => api.get('/server-requests'),
   getPendingRequests: () => api.get('/server-requests/pending'),
   reviewRequest: (requestId: string, data: { approved: boolean; reviewNote?: string }) =>

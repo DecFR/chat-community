@@ -1,8 +1,8 @@
 import { Router } from 'express';
 
-import { authController } from '../controllers/auth.controller';
-import { authMiddleware } from '../middleware/auth';
-import logger from '../utils/logger';
+import { authController } from '../controllers/auth.controller.js';
+import { authMiddleware } from '../middleware/auth.js';
+import logger from '../utils/logger.js';
 
 const router = Router();
 
@@ -20,7 +20,7 @@ router.post('/register', authController.register);
  */
 router.get('/check-users', async (_req, res) => {
   try {
-    const prisma = (await import('../utils/prisma')).default;
+    const prisma = (await import('../utils/prisma.js')).default;
     const userCount = await prisma.user.count();
     res.json({ success: true, data: { hasUsers: userCount > 0 } });
   } catch (error) {

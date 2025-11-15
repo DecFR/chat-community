@@ -46,6 +46,7 @@ if (enableCluster && cluster.isPrimary) {
     import('./routes/serverRequest.routes.js'),
     import('./routes/invite.routes.js'),
     import('./utils/avatarCleanupScheduler.js'),
+    import('./utils/sessionCleanupScheduler.js'),
     import('./utils/perfMonitor.js'),
   ])
     .then(
@@ -66,6 +67,7 @@ if (enableCluster && cluster.isPrimary) {
         { default: serverRequestRoutes },
         { default: inviteRoutes },
         { startAvatarCleanupScheduler },
+        { startSessionCleanupScheduler },
         { startPerfMonitor },
       ]) => {
         const { initializeSocket } = socketModule;
@@ -166,6 +168,7 @@ if (enableCluster && cluster.isPrimary) {
           startAvatarCleanupScheduler().catch((e: unknown) =>
             logger.error('Failed to start cleanup scheduler', e)
           );
+          startSessionCleanupScheduler();
         });
 
         process.on('SIGTERM', () => {

@@ -1,6 +1,6 @@
 import os from 'os';
 
-import { notifyAdmins } from './adminNotify';
+import { notifyAdmins } from './adminNotify.js';
 
 let lastNotify = 0;
 const NOTIFY_INTERVAL = 10 * 60 * 1000; // 10分钟内只通知一次

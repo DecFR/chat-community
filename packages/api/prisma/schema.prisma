@@ -81,6 +81,7 @@ model User {
 
   // 关联
   settings               UserSettings?
+  sessions               UserSession[]
   sentFriendRequests     Friendship[]                @relation("SentFriendRequests")
   receivedFriendRequests Friendship[]                @relation("ReceivedFriendRequests")
   serverMembers          ServerMember[]
@@ -96,6 +97,24 @@ model User {
 
   @@index([username])
   @@index([email])
+}
+
+// 用户会话模型 - 用于单点登录控制
+model UserSession {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token        String   @unique
+  socketId     String?  @unique
+  ipAddress    String?
+  userAgent    String?
+  lastActiveAt DateTime @default(now())
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+
+  @@index([userId])
+  @@index([token])
+  @@index([expiresAt])
 }
 
 model UserSettings {

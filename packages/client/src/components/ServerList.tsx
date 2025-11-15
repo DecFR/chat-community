@@ -7,7 +7,7 @@ import AddServerModal from './AddServerModal';
 import { socketService } from '../lib/socket';
 
 export default function ServerList() {
-  const { servers, currentServerId, selectServer, isServersLoaded, loadServers } = useServerStore();
+  const { servers, currentServerId, selectServer, isServersLoaded, loadServers, leaveServer } = useServerStore();
   const { user } = useAuthStore();
   const { channelUnread } = useUnreadStore();
   const navigate = useNavigate();
@@ -31,12 +31,19 @@ export default function ServerList() {
     socket.on('serverUpdate', handleServerUpdate);
     socket.on('serverDelete', handleServerUpdate);
     socket.on('serverMemberUpdate', handleServerUpdate);
+    // 加入申请批准后：自动加入 socket 房间并刷新
+    const handleJoinApproved = (data: { serverId: string }) => {
+      socketService.joinServer(data.serverId);
+      loadServers();
+    };
+    socket.on('serverJoinApproved', handleJoinApproved);
 
     return () => {
       socket.off('serverCreate', handleServerUpdate);
       socket.off('serverUpdate', handleServerUpdate);
       socket.off('serverDelete', handleServerUpdate);
       socket.off('serverMemberUpdate', handleServerUpdate);
+      socket.off('serverJoinApproved', handleJoinApproved);
     };
   }, [loadServers]);
 
@@ -107,27 +114,45 @@ export default function ServerList() {
       {servers.map((server) => {
         const unreadTotal = (server.channels || []).reduce((sum, ch) => sum + (channelUnread[ch.id] || 0), 0);
         return (
-        <button
-          key={server.id}
-          onClick={() => handleServerClick(server.id)}
-          className={`relative w-12 h-12 rounded-full flex items-center justify-center font-semibold transition-all ${
-            currentServerId === server.id
-              ? 'bg-discord-blue text-white rounded-2xl'
-              : 'bg-discord-gray text-white hover:bg-discord-blue hover:rounded-2xl'
-          }`}
-          title={server.name}
-        >
-          {server.imageUrl ? (
-            <img src={server.imageUrl} alt={server.name} className="w-full h-full rounded-full object-cover" />
-          ) : (
-            <span className="text-lg">{server.name.substring(0, 2).toUpperCase()}</span>
+        <div key={server.id} className="relative group">
+          <button
+            onClick={() => handleServerClick(server.id)}
+            className={`relative w-12 h-12 rounded-full flex items-center justify-center font-semibold transition-all ${
+              currentServerId === server.id
+                ? 'bg-discord-blue text-white rounded-2xl'
+                : 'bg-discord-gray text-white hover:bg-discord-blue hover:rounded-2xl'
+            }`}
+            title={server.name}
+          >
+            {server.imageUrl ? (
+              <img src={server.imageUrl} alt={server.name} className="w-full h-full rounded-full object-cover" />
+            ) : (
+              <span className="text-lg">{server.name.substring(0, 2).toUpperCase()}</span>
+            )}
+            {unreadTotal > 0 && (
+              <span className="absolute -top-1 -right-1 inline-flex min-w-[18px] h-5 px-1 items-center justify-center rounded-full bg-red-500 text-white text-xs shadow">
+                {unreadTotal}
+              </span>
+            )}
+          </button>
+          {/* 退出按钮：非 owner 且当前用户点击显示 */}
+          {user && server.ownerId !== user.id && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (confirm(`确认退出服务器: ${server.name} ?`)) {
+                  leaveServer(server.id).then(() => {
+                    socketService.leaveServer(server.id);
+                  });
+                }
+              }}
+              title="退出服务器"
+              className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-red-600 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow"
+            >
+              ×
+            </button>
           )}
-          {unreadTotal > 0 && (
-            <span className="absolute -top-1 -right-1 inline-flex min-w-[18px] h-5 px-1 items-center justify-center rounded-full bg-red-500 text-white text-xs shadow">
-              {unreadTotal}
-            </span>
-          )}
-        </button>
+        </div>
       )})}
 
       {/* 添加服务器按钮 */}

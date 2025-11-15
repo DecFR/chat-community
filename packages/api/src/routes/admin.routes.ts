@@ -1,10 +1,10 @@
 import { Router } from 'express';
 
-import { authMiddleware, adminMiddleware } from '../middleware/auth';
-import { getAdminNotifications } from '../utils/adminNotify';
-import { rescheduleAvatarCleanupScheduler } from '../utils/avatarCleanupScheduler';
-import { cleanupUnusedAvatars } from '../utils/cleanup';
-import { getAvatarCleanupConfig, updateAvatarCleanupConfig } from '../utils/config';
+import { authMiddleware, adminMiddleware } from '../middleware/auth.js';
+import { getAdminNotifications } from '../utils/adminNotify.js';
+import { rescheduleAvatarCleanupScheduler } from '../utils/avatarCleanupScheduler.js';
+import { cleanupUnusedAvatars } from '../utils/cleanup.js';
+import { getAvatarCleanupConfig, updateAvatarCleanupConfig } from '../utils/config.js';
 
 const router = Router();
 /**
@@ -34,7 +34,7 @@ router.use(authMiddleware, adminMiddleware);
  */
 router.get('/users', async (_req, res) => {
   try {
-    const prisma = (await import('../utils/prisma')).default;
+    const prisma = (await import('../utils/prisma.js')).default;
     const users = await prisma.user.findMany({
       select: {
         id: true,
@@ -63,7 +63,7 @@ router.get('/users', async (_req, res) => {
  */
 router.get('/servers', async (_req, res) => {
   try {
-    const prisma = (await import('../utils/prisma')).default;
+    const prisma = (await import('../utils/prisma.js')).default;
     const servers = await prisma.server.findMany({
       include: {
         _count: {
@@ -92,7 +92,7 @@ router.get('/servers', async (_req, res) => {
  */
 router.delete('/users/:id', async (req, res) => {
   try {
-    const prisma = (await import('../utils/prisma')).default;
+    const prisma = (await import('../utils/prisma.js')).default;
 
     // 获取第一个用户（超级管理员）
     const firstUser = await prisma.user.findFirst({
@@ -126,7 +126,7 @@ router.delete('/users/:id', async (req, res) => {
  */
 router.delete('/servers/:id', async (req, res) => {
   try {
-    const prisma = (await import('../utils/prisma')).default;
+    const prisma = (await import('../utils/prisma.js')).default;
     await prisma.server.delete({
       where: { id: req.params.id },
     });
@@ -146,8 +146,8 @@ router.delete('/servers/:id', async (req, res) => {
 router.delete('/messages', async (req, res) => {
   try {
     const { channelId, conversationId } = req.query;
-    const prisma = (await import('../utils/prisma')).default;
-    const { getIO } = await import('../socket');
+    const prisma = (await import('../utils/prisma.js')).default;
+    const { getIO } = await import('../socket/index.js');
     const io = getIO();
 
     let deletedCount = 0;
@@ -233,7 +233,7 @@ router.delete('/messages', async (req, res) => {
 router.post('/invite-codes', async (req, res) => {
   try {
     const { userId, expiresInDays = 7 } = req.body;
-    const { inviteService } = await import('../services/invite.service');
+    const { inviteService } = await import('../services/invite.service.js');
 
     // 如果没有指定userId，使用当前登录的管理员ID
     const targetUserId = userId || req.user?.id;
@@ -258,7 +258,7 @@ router.post('/invite-codes', async (req, res) => {
  */
 router.get('/invite-codes', async (_req, res) => {
   try {
-    const prisma = (await import('../utils/prisma')).default;
+    const prisma = (await import('../utils/prisma.js')).default;
     const inviteCodes = await prisma.userInviteCode.findMany({
       include: {
         user: {
@@ -288,7 +288,7 @@ router.get('/invite-codes', async (_req, res) => {
  */
 router.patch('/users/:id/role', async (req, res) => {
   try {
-    const prisma = (await import('../utils/prisma')).default;
+    const prisma = (await import('../utils/prisma.js')).default;
     const { role } = req.body;
 
     if (!['ADMIN', 'USER'].includes(role)) {
@@ -390,7 +390,7 @@ router.put('/config/cleanup-avatars', async (req, res) => {
  */
 router.get('/stats', async (_req, res) => {
   try {
-    const prisma = (await import('../utils/prisma')).default;
+    const prisma = (await import('../utils/prisma.js')).default;
 
     const [totalUsers, totalServers, totalMessages, onlineUsers] = await Promise.all([
       prisma.user.count(),
@@ -462,7 +462,7 @@ router.get('/system-info', async (_req, res) => {
  */
 router.get('/config/thread-pool', async (_req, res) => {
   try {
-    const { getThreadPoolConfig } = await import('../utils/config');
+    const { getThreadPoolConfig } = await import('../utils/config.js');
     const cfg = await getThreadPoolConfig();
     res.json({ success: true, data: cfg });
   } catch (error: unknown) {
@@ -483,7 +483,7 @@ router.put('/config/thread-pool', async (req, res) => {
       return res.status(400).json({ success: false, error: 'maxThreads 必须是大于 0 的整数' });
     }
 
-    const { updateThreadPoolConfig } = await import('../utils/config');
+    const { updateThreadPoolConfig } = await import('../utils/config.js');
     const next = await updateThreadPoolConfig({ maxThreads });
     res.json({ success: true, data: next });
   } catch (error: unknown) {

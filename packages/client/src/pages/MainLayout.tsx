@@ -90,21 +90,6 @@ export default function MainLayout() {
     loadFriends();
     loadPendingRequests();
 
-    // 加入所有服务器的 Socket 房间
-    const joinAllServers = () => {
-      const { servers } = useServerStore.getState();
-      servers.forEach((server) => {
-        socketService.joinServer(server.id);
-      });
-    };
-    
-    // 延迟加入房间，确保 servers 已加载
-    const timer = setTimeout(() => {
-      if (isServersLoaded) {
-        joinAllServers();
-      }
-    }, 500);
-
     // 监听好友状态更新
     const handleFriendStatusUpdate = (data: any) => {
       updateFriendStatus(data.userId, data.status);
@@ -119,23 +104,27 @@ export default function MainLayout() {
     socketService.on('friendRequestAccepted', handleFriendRequestAccepted);
 
     return () => {
-      clearTimeout(timer);
       socketService.off('friendStatusUpdate', handleFriendStatusUpdate);
       socketService.off('friendRequestAccepted', handleFriendRequestAccepted);
     };
   }, [isAuthenticated, navigate, loadUser, isServersLoaded, loadServers, loadFriends, loadPendingRequests, updateFriendStatus]);
 
-  // 确保始终加入所有已加载服务器房间（包括后来新建/加入的）
+  // 当服务器加载完成后，立即加入所有服务器房间
   useEffect(() => {
-    const joined = (MainLayout as any)._joinedServers || new Set<string>();
-    (MainLayout as any)._joinedServers = joined;
-    servers.forEach(s => {
-      if (s?.id && !joined.has(s.id)) {
-        socketService.joinServer(s.id);
-        joined.add(s.id);
-      }
+    if (!isServersLoaded || servers.length === 0) return;
+    
+    console.log('[MainLayout] Servers loaded, joining all server rooms');
+    const serverIds = servers.map(s => s.id).filter(Boolean);
+    socketService.joinServers(serverIds);
+    
+    // 设置Socket重连回调，重连后自动重新加入所有房间
+    socketService.setReconnectCallback(() => {
+      console.log('[MainLayout] Socket reconnected, rejoining all server rooms');
+      const { servers } = useServerStore.getState();
+      const serverIds = servers.map(s => s.id).filter(Boolean);
+      socketService.joinServers(serverIds);
     });
-  }, [servers]);
+  }, [isServersLoaded, servers]);
 
   // 监听服务器和频道变化,实时更新
   useEffect(() => {

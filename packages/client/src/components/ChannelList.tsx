@@ -388,8 +388,8 @@ export default function ChannelList() {
     <div className="w-60 bg-discord-darker flex flex-col">
       <div className="h-12 border-b border-discord-darkest flex items-center justify-between px-4 font-semibold text-white shadow-md">
         <span className="truncate" title={currentServer?.name}>{currentServer?.name || '服务器'}</span>
-        {/* 公共服务器不显示服务器设置按钮,私有服务器的owner和admin可以管理 */}
-        {!currentServer.isPublic && (user?.role === 'ADMIN' || currentServer.ownerId === user?.id) && (
+        {/* 仅服务器创建者可管理 */}
+        {currentServer.ownerId === user?.id && (
           <button
             onClick={() => setShowServerManage(true)}
             className="p-1 rounded hover:bg-discord-darkest"
@@ -407,8 +407,8 @@ export default function ChannelList() {
         <div className="p-2 space-y-1">
           <div className="text-xs font-semibold text-gray-400 px-2 py-1 flex items-center justify-between">
             <span>频道</span>
-            {/* 公共服务器只有ADMIN可以创建频道,私有服务器的owner和admin可以创建 */}
-            {(currentServer.isPublic ? user?.role === 'ADMIN' : (user?.role === 'ADMIN' || currentServer.ownerId === user?.id)) && (
+            {/* 仅服务器创建者可创建频道 */}
+            {currentServer.ownerId === user?.id && (
               <button
                 onClick={() => setIsCreatingChannel(true)}
                 className="hover:text-white transition-colors"
@@ -507,8 +507,8 @@ export default function ChannelList() {
                         {channelUnread[channel.id]}
                       </span>
                     )}
-                    {/* 公共服务器只有ADMIN可以管理频道,私有服务器的owner和admin可以管理 */}
-                    {(currentServer.isPublic ? user?.role === 'ADMIN' : (user?.role === 'ADMIN' || currentServer.ownerId === user?.id)) && (
+                    {/* 仅服务器创建者可管理频道 */}
+                    {currentServer.ownerId === user?.id && (
                       <div
                         onClick={(e) => {
                           e.stopPropagation();

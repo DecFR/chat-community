@@ -1,8 +1,8 @@
 import { Prisma } from '@prisma/client';
 import { Router } from 'express';
 
-import { authMiddleware } from '../middleware/auth';
-import { getIO } from '../socket';
+import { authMiddleware } from '../middleware/auth.js';
+import { getIO } from '../socket/index.js';
 
 const router = Router();
 
@@ -58,13 +58,17 @@ router.get('/search', async (req, res) => {
 router.post('/', async (req, res) => {
   const { name, description } = req.body;
   const userId = req.user!.id;
+  const userRole = req.user!.role;
 
   if (!name) {
     return res.status(400).json({ success: false, error: '服务器名称不能为空' });
   }
 
   try {
-    const prisma = (await import('../utils/prisma')).default;
+    const prisma = (await import('../utils/prisma.js')).default;
+
+    // 管理员创建的服务器默认公开,用户申请的默认私有
+    const isPublic = userRole === 'ADMIN';
 
     // 使用事务确保服务器和默认频道/成员的原子创建
     const newServer = await prisma.$transaction(async (tx) => {
@@ -74,6 +78,7 @@ router.post('/', async (req, res) => {
           name,
           description: description || '',
           ownerId: userId,
+          isPublic,
         },
       });
 
@@ -112,7 +117,7 @@ router.post('/', async (req, res) => {
 
       if (fullServerData) {
         // 5. 如果服务器是公开的，则广播给所有在线用户
-        const { getIO } = await import('../socket');
+        const { getIO } = await import('../socket/index.js');
         const io = getIO();
         if (fullServerData.isPublic) {
           io.emit('serverCreate', fullServerData);
@@ -131,13 +136,13 @@ router.post('/', async (req, res) => {
 
 /**
  * @route   GET /api/servers
- * @desc    获取用户可见的服务器（公开服务器 + 用户已加入的私有服务器）
+ * @desc    获取用户可见的服务器(用户已加入的服务器 + 管理员创建的公开服务器)
  * @access  Private
  */
 router.get('/', async (req, res) => {
   try {
     const userId = req.user!.id;
-    const prisma = (await import('../utils/prisma')).default;
+    const prisma = (await import('../utils/prisma.js')).default;
 
     // 获取用户已加入的服务器ID列表
     const userMemberships = await prisma.serverMember.findMany({
@@ -146,14 +151,18 @@ router.get('/', async (req, res) => {
     });
     const userServerIds = userMemberships.map((m) => m.serverId);
 
-    // 查询: 公开服务器 OR 用户已加入的服务器
-    const servers = await prisma.server.findMany({
-      where: {
-        OR: [{ isPublic: true }, { id: { in: userServerIds } }],
-      },
+    // 查询所有服务器(包含owner信息用于过滤)
+    const allServers = await prisma.server.findMany({
       include: {
         channels: true,
-        owner: true,
+        owner: {
+          select: {
+            id: true,
+            username: true,
+            avatarUrl: true,
+            role: true,
+          },
+        },
         _count: {
           select: {
             members: true,
@@ -164,6 +173,13 @@ router.get('/', async (req, res) => {
       orderBy: {
         createdAt: 'asc',
       },
+    });
+
+    // 过滤: 用户已加入的服务器 OR (管理员创建的公开服务器)
+    const servers = allServers.filter((server) => {
+      const isUserMember = userServerIds.includes(server.id);
+      const isAdminPublicServer = server.owner.role === 'ADMIN' && server.isPublic;
+      return isUserMember || isAdminPublicServer;
     });
 
     res.json({ success: true, data: servers });
@@ -181,7 +197,7 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const serverId = req.params.id;
-    const prisma = (await import('../utils/prisma')).default;
+    const prisma = (await import('../utils/prisma.js')).default;
 
     const server = await prisma.server.findUnique({
       where: { id: serverId },
@@ -222,7 +238,7 @@ router.get('/:id/members', async (req, res) => {
   try {
     const serverId = req.params.id;
     const userId = req.user!.id;
-    const prisma = (await import('../utils/prisma')).default;
+    const prisma = (await import('../utils/prisma.js')).default;
 
     // 服务器存在性与公开性
     const server = await prisma.server.findUnique({
@@ -280,21 +296,20 @@ router.get('/:id/members', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const serverId = req.params.id;
-    const { name, description, isPublic } = req.body as { name?: string; description?: string; isPublic?: boolean };
+    const { name, description } = req.body as { name?: string; description?: string };
     const userId = req.user!.id;
 
-    const prisma = (await import('../utils/prisma')).default;
+    const prisma = (await import('../utils/prisma.js')).default;
 
-    // 检查用户是否是服务器所有者或管理员
+    // 检查用户是否是服务器所有者 (仅 OWNER 可管理服务器)
     const member = await prisma.serverMember.findFirst({
       where: {
         serverId,
         userId,
       },
     });
-
-    if (!member || (member.role !== 'OWNER' && member.role !== 'ADMIN')) {
-      return res.status(403).json({ success: false, error: 'No permission to update server' });
+    if (!member || member.role !== 'OWNER') {
+      return res.status(403).json({ success: false, error: 'Only owner can update server' });
     }
 
     const server = await prisma.server.update({
@@ -302,7 +317,6 @@ router.put('/:id', async (req, res) => {
       data: {
         ...(name && { name }),
         ...(description !== undefined && { description }),
-        ...(typeof isPublic === 'boolean' && { isPublic }),
       },
       include: {
         channels: true,
@@ -338,7 +352,7 @@ router.delete('/:id', async (req, res) => {
     const serverId = req.params.id;
     const userId = req.user!.id;
 
-    const prisma = (await import('../utils/prisma')).default;
+    const prisma = (await import('../utils/prisma.js')).default;
 
     // 检查用户是否是服务器所有者
     const server = await prisma.server.findUnique({
@@ -379,8 +393,16 @@ router.post('/:id/channels', async (req, res) => {
   try {
     const serverId = req.params.id;
     const { name, description, type } = req.body;
+    const userId = req.user!.id;
 
-    const prisma = (await import('../utils/prisma')).default;
+    const prisma = (await import('../utils/prisma.js')).default;
+
+    // 权限：仅服务器所有者可创建频道
+    const server = await prisma.server.findUnique({ where: { id: serverId } });
+    if (!server) return res.status(404).json({ success: false, error: 'Server not found' });
+    if (server.ownerId !== userId) {
+      return res.status(403).json({ success: false, error: 'Only owner can create channel' });
+    }
 
     const channel = await prisma.channel.create({
       data: {
@@ -416,18 +438,17 @@ router.put('/:serverId/channels/:channelId', async (req, res) => {
     const { name, description } = req.body;
     const userId = req.user!.id;
 
-    const prisma = (await import('../utils/prisma')).default;
+    const prisma = (await import('../utils/prisma.js')).default;
 
-    // 检查用户是否是服务器成员且有权限
+    // 检查用户是否是服务器成员且为所有者
     const member = await prisma.serverMember.findFirst({
       where: {
         serverId,
         userId,
       },
     });
-
-    if (!member || (member.role !== 'OWNER' && member.role !== 'ADMIN')) {
-      return res.status(403).json({ success: false, error: 'No permission to update channel' });
+    if (!member || member.role !== 'OWNER') {
+      return res.status(403).json({ success: false, error: 'Only owner can update channel' });
     }
 
     const channel = await prisma.channel.update({
@@ -463,18 +484,17 @@ router.delete('/:serverId/channels/:channelId', async (req, res) => {
     const { serverId, channelId } = req.params;
     const userId = req.user!.id;
 
-    const prisma = (await import('../utils/prisma')).default;
+    const prisma = (await import('../utils/prisma.js')).default;
 
-    // 检查用户是否是服务器成员且有权限
+    // 检查用户是否是服务器成员且为所有者
     const member = await prisma.serverMember.findFirst({
       where: {
         serverId,
         userId,
       },
     });
-
-    if (!member || (member.role !== 'OWNER' && member.role !== 'ADMIN')) {
-      return res.status(403).json({ success: false, error: 'No permission to delete channel' });
+    if (!member || member.role !== 'OWNER') {
+      return res.status(403).json({ success: false, error: 'Only owner can delete channel' });
     }
 
     // 检查是否是最后一个频道
@@ -514,7 +534,7 @@ router.post('/:id/join-requests', async (req, res) => {
     const serverId = req.params.id;
     const userId = req.user!.id;
     const { reason } = req.body as { reason?: string };
-    const prisma = (await import('../utils/prisma')).default;
+    const prisma = (await import('../utils/prisma.js')).default;
 
     // 检查服务器存在
     const server = await prisma.server.findUnique({ where: { id: serverId } });
@@ -547,7 +567,7 @@ router.post('/:id/join-requests', async (req, res) => {
     });
 
     // 通知服务器创建者有新的加入申请
-    const { getIO } = await import('../socket');
+    const { getIO } = await import('../socket/index.js');
     const io = getIO();
     io.to(`user-${server.ownerId}`).emit('serverJoinRequest', {
       serverId,
@@ -563,6 +583,54 @@ router.post('/:id/join-requests', async (req, res) => {
 });
 
 /**
+ * @route   GET /api/servers/my-join-requests
+ * @desc    获取当前用户的所有服务器加入申请记录
+ * @access  Private
+ */
+router.get('/my-join-requests', async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ success: false, error: '未授权' });
+
+    const prisma = (await import('../utils/prisma.js')).default;
+    const requests = await prisma.serverJoinRequest.findMany({
+      where: { applicantId: userId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        server: {
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            iconUrl: true,
+          },
+        },
+      },
+    });
+
+    // 格式化数据以匹配客户端期望的格式
+    const formattedRequests = requests.map((request) => ({
+      id: request.id,
+      name: request.server.name,
+      description: request.server.description,
+      status: request.status,
+      reason: request.reason,
+      reviewNote: request.reviewNote,
+      reviewedAt: request.reviewedAt,
+      createdAt: request.createdAt,
+      serverId: request.serverId,
+      serverIconUrl: request.server.iconUrl,
+    }));
+
+    return res.json({ success: true, data: formattedRequests });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    return res.status(500).json({ success: false, error: message });
+  }
+});
+
+
+/**
  * @route   GET /api/servers/:id/join-requests
  * @desc    服务器所有者查看加入申请列表
  * @access  Private (owner-only)
@@ -571,7 +639,7 @@ router.get('/:id/join-requests', async (req, res) => {
   try {
     const serverId = req.params.id;
     const userId = req.user!.id;
-    const prisma = (await import('../utils/prisma')).default;
+    const prisma = (await import('../utils/prisma.js')).default;
 
     const server = await prisma.server.findUnique({ where: { id: serverId } });
     if (!server) return res.status(404).json({ success: false, error: '服务器不存在' });
@@ -600,7 +668,7 @@ router.post('/:serverId/join-requests/:requestId/review', async (req, res) => {
     const { serverId, requestId } = req.params as { serverId: string; requestId: string };
     const { approved, reviewNote } = req.body as { approved: boolean; reviewNote?: string };
     const userId = req.user!.id;
-    const prisma = (await import('../utils/prisma')).default;
+    const prisma = (await import('../utils/prisma.js')).default;
 
     const server = await prisma.server.findUnique({ where: { id: serverId } });
     if (!server) return res.status(404).json({ success: false, error: '服务器不存在' });
@@ -614,6 +682,25 @@ router.post('/:serverId/join-requests/:requestId/review', async (req, res) => {
       return res.status(400).json({ success: false, error: '该申请已处理' });
 
     if (approved) {
+      // 检查用户是否已经是成员
+      const existingMember = await prisma.serverMember.findUnique({
+        where: { serverId_userId: { serverId, userId: reqRec.applicantId } },
+      });
+      
+      if (existingMember) {
+        // 用户已经是成员，只更新申请状态
+        await prisma.serverJoinRequest.update({
+          where: { id: requestId },
+          data: {
+            status: 'APPROVED',
+            reviewNote: reviewNote || '用户已是服务器成员',
+            reviewedAt: new Date(),
+            reviewerId: userId,
+          },
+        });
+        return res.json({ success: true, message: '用户已是服务器成员' });
+      }
+      
       // 同意：创建成员，更新申请
       await prisma.$transaction([
         prisma.serverMember.create({
@@ -629,6 +716,13 @@ router.post('/:serverId/join-requests/:requestId/review', async (req, res) => {
           },
         }),
       ]);
+
+      // 通知申请用户加入已批准 => 客户端可自动加入 socket 房间并刷新服务器列表
+      const io = getIO();
+      io.to(`user-${reqRec.applicantId}`).emit('serverJoinApproved', {
+        serverId,
+        serverName: server.name,
+      });
     } else {
       await prisma.serverJoinRequest.update({
         where: { id: requestId },
@@ -642,6 +736,51 @@ router.post('/:serverId/join-requests/:requestId/review', async (req, res) => {
     }
 
     res.json({ success: true });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    return res.status(500).json({ success: false, error: message });
+  }
+});
+
+/**
+ * @route   DELETE /api/servers/:id/leave
+ * @desc    当前用户离开服务器（OWNER 不可离开，需要删除服务器）
+ * @access  Private
+ */
+router.delete('/:id/leave', async (req, res) => {
+  try {
+    const serverId = req.params.id;
+    const userId = req.user!.id;
+    const prisma = (await import('../utils/prisma.js')).default;
+
+    const server = await prisma.server.findUnique({ where: { id: serverId } });
+    if (!server) return res.status(404).json({ success: false, error: 'Server not found' });
+
+    // 创建者不能直接离开，只能删除服务器
+    if (server.ownerId === userId) {
+      return res.status(400).json({ success: false, error: 'Owner cannot leave the server' });
+    }
+
+    const membership = await prisma.serverMember.findUnique({
+      where: { serverId_userId: { serverId, userId } },
+    });
+    if (!membership) {
+      return res.status(400).json({ success: false, error: 'You are not a member of this server' });
+    }
+
+    await prisma.serverMember.delete({
+      where: { serverId_userId: { serverId, userId } },
+    });
+
+    // 发送成员离开事件（用于刷新成员列表与服务器列表）
+    const io = getIO();
+    io.to(`server-${serverId}`).emit('serverMemberUpdate', {
+      serverId,
+      userId,
+      action: 'leave',
+    });
+
+    return res.json({ success: true, message: 'Left server successfully' });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'An unknown error occurred';
     return res.status(500).json({ success: false, error: message });

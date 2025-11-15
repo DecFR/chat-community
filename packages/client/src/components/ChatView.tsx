@@ -114,17 +114,14 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
   // 追踪上一次加载的目标ID,防止不必要的重新加载导致消息丢失
   const lastLoadedTargetRef = useRef<string>('');
   const [isNearBottom, setIsNearBottom] = useState(true);
+  const [rateLimitWaitMs, setRateLimitWaitMs] = useState(0);
+  const rateLimitTimerRef = useRef<number | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const scrollToFirstUnread = useCallback(() => {
-    const firstUnread = document.querySelector('.first-unread-message');
-    if (firstUnread) {
-      firstUnread.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-  }, []);
+  // scrollToFirstUnread 已不再使用，移除以避免未使用警告
 
   // 获取已读位置
   useEffect(() => {
@@ -235,12 +232,8 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
           }
         }
 
-        // 滚动行为
-        if (savedLastRead) {
-          setTimeout(() => scrollToFirstUnread(), 100);
-        } else {
-          setTimeout(() => scrollToBottom(), 100);
-        }
+        // 滚动行为:始终滚动到底部(最新消息)
+        setTimeout(() => scrollToBottom(), 100);
       } finally {
         setIsLoading(false);
       }
@@ -401,11 +394,9 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
           });
           return Array.from(uniq.values());
         });
-        // 只有在接近底部时才自动滚动
-        if (isNearBottom) {
-          setTimeout(() => scrollToBottom(), 100);
-          setTimeout(() => markAsRead(), 500);
-        }
+        // 自动滚动到底部并标记已读
+        setTimeout(() => scrollToBottom(), 100);
+        setTimeout(() => markAsRead(), 500);
       }
     };
 
@@ -429,11 +420,9 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
             });
             return Array.from(uniq.values());
           });
-          // 只有在接近底部时才自动滚动
-          if (isNearBottom) {
-            setTimeout(() => scrollToBottom(), 100);
-            setTimeout(() => markAsRead(), 500);
-          }
+          // 自动滚动到底部并标记已读
+          setTimeout(() => scrollToBottom(), 100);
+          setTimeout(() => markAsRead(), 500);
         }
       }
     };
@@ -443,10 +432,32 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
     socket.off('directMessage');
     socket.off('friendProfileUpdate');
     socket.off('userProfileUpdate');
+    socket.off('messageRateLimited');
     
     // 注册新监听器
     socket.on('channelMessage', handleNewMessage);
     socket.on('directMessage', handleDirectMessage);
+
+    // 速率限制提示
+    const handleRateLimited = (data: { waitMs: number }) => {
+      if (data.waitMs > 0) {
+        setRateLimitWaitMs(data.waitMs);
+        if (rateLimitTimerRef.current) window.clearInterval(rateLimitTimerRef.current);
+        const start = Date.now();
+        rateLimitTimerRef.current = window.setInterval(() => {
+          const elapsed = Date.now() - start;
+          const remain = data.waitMs - elapsed;
+          if (remain <= 0) {
+            setRateLimitWaitMs(0);
+            if (rateLimitTimerRef.current) window.clearInterval(rateLimitTimerRef.current);
+            rateLimitTimerRef.current = null;
+          } else {
+            setRateLimitWaitMs(remain);
+          }
+        }, 120);
+      }
+    };
+    socket.on('messageRateLimited', handleRateLimited);
 
     // 监听好友资料更新,实时刷新聊天消息中的头像
     const handleProfileUpdate = (data: { userId: string; avatarUrl?: string; username?: string }) => {
@@ -486,6 +497,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
       socket.off('friendProfileUpdate', handleProfileUpdate);
       socket.off('userProfileUpdate', handleProfileUpdate);
       socket.off('friendRemoved', handleFriendRemoved);
+      socket.off('messageRateLimited', handleRateLimited);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDM, friendId, channelId, user?.id]);
@@ -531,6 +543,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
+    if (rateLimitWaitMs > 0) return; // 速率限制期间禁止发送
     if (!newMessage.trim() && pendingFiles.length === 0) return;
 
     const send = async () => {
@@ -771,8 +784,14 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
                 }
               }}
               placeholder="发送消息..."
-              className="flex-1 px-2 py-3 bg-transparent text-white placeholder-gray-500 focus:outline-none"
+              className={`flex-1 px-2 py-3 bg-transparent text-white placeholder-gray-500 focus:outline-none ${rateLimitWaitMs>0?'opacity-60 cursor-not-allowed':''}`}
+              disabled={rateLimitWaitMs > 0}
             />
+            {rateLimitWaitMs > 0 && (
+              <span className="px-3 text-xs text-red-400 select-none">
+                冷却 {Math.ceil(rateLimitWaitMs/1000)}s...
+              </span>
+            )}
           </div>
           <TypingIndicator typingUsers={typingUsers} />
         </form>

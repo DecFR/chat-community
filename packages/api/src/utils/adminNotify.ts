@@ -1,4 +1,4 @@
-import prisma from './prisma';
+import prisma from './prisma.js';
 
 /**
  * 发送系统通知给所有管理员

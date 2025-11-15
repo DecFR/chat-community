@@ -1,8 +1,8 @@
 import { Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
 
-import { authService } from '../services/auth.service';
-import { successResponse, errorResponse } from '../utils/response';
+import { authService } from '../services/auth.service.js';
+import { successResponse, errorResponse } from '../utils/response.js';
 
 export const authController = {
   /**
@@ -57,7 +57,15 @@ export const authController = {
         }
 
         const { username, password } = req.body;
-        const result = await authService.login({ username, password });
+        const ipAddress = req.ip || req.socket.remoteAddress;
+        const userAgent = req.headers['user-agent'];
+
+        const result = await authService.login({ 
+          username, 
+          password, 
+          ipAddress, 
+          userAgent 
+        });
 
         res.json(successResponse(result, 'Login successful'));
       } catch (error: unknown) {

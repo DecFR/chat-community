@@ -2,7 +2,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { parentPort, workerData } from 'worker_threads';
 
-import prisma from './prisma';
+import prisma from './prisma.js';
 
 // 只实现头像清理任务
 async function cleanupUnusedAvatarsWorker({

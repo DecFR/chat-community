@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
-import prisma from '../utils/prisma';
+import prisma from '../utils/prisma.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 const SALT_ROUNDS = 10;
@@ -16,6 +16,8 @@ interface RegisterData {
 interface LoginData {
   username: string;
   password: string;
+  ipAddress?: string;
+  userAgent?: string;
 }
 
 export const authService = {
@@ -114,7 +116,7 @@ export const authService = {
    * 用户登录
    */
   async login(data: LoginData) {
-    const { username, password } = data;
+    const { username, password, ipAddress, userAgent } = data;
 
     // 查找用户
     const user = await prisma.user.findUnique({
@@ -132,15 +134,47 @@ export const authService = {
       throw new Error('用户名或密码错误');
     }
 
+    // 生成 JWT token
+    const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, {
+      expiresIn: '7d',
+    });
+
+    // 计算过期时间
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7);
+
+    // 查找用户的所有活跃会话
+    const existingSessions = await prisma.userSession.findMany({
+      where: {
+        userId: user.id,
+        expiresAt: { gt: new Date() },
+      },
+    });
+
+    // 如果存在活跃会话，删除旧会话（强制单点登录）
+    if (existingSessions.length > 0) {
+      await prisma.userSession.deleteMany({
+        where: {
+          userId: user.id,
+        },
+      });
+    }
+
+    // 创建新会话记录
+    await prisma.userSession.create({
+      data: {
+        userId: user.id,
+        token,
+        ipAddress,
+        userAgent,
+        expiresAt,
+      },
+    });
+
     // 更新用户状态为在线
     await prisma.user.update({
       where: { id: user.id },
       data: { status: 'ONLINE' },
-    });
-
-    // 生成 JWT token
-    const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, {
-      expiresIn: '7d',
     });
 
     return {

@@ -2,8 +2,8 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-import { getAvatarCleanupConfig } from './config';
-import prisma from './prisma';
+import { getAvatarCleanupConfig } from './config.js';
+import prisma from './prisma.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

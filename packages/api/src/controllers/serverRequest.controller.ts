@@ -1,9 +1,9 @@
 import { Request, Response } from 'express';
 
-import { serverRequestService } from '../services/serverRequest.service';
-import logger from '../utils/logger';
-import prisma from '../utils/prisma';
-import { successResponse, errorResponse } from '../utils/response';
+import { serverRequestService } from '../services/serverRequest.service.js';
+import logger from '../utils/logger.js';
+import prisma from '../utils/prisma.js';
+import { successResponse, errorResponse } from '../utils/response.js';
 
 export const serverRequestController = {
   /**
@@ -32,7 +32,7 @@ export const serverRequestController = {
 
       // 通知所有管理员
       try {
-        const { getIO } = await import('../socket');
+        const { getIO } = await import('../socket/index.js');
         const io = getIO();
 
         // 获取所有管理员
@@ -91,7 +91,7 @@ export const serverRequestController = {
   /**
    * 管理员获取所有申请
    */
-  async getAllRequests(req: Request, res: Response) {
+  async getAllRequests(_req: Request, res: Response) {
     // Admin only
     try {
       const requests = serverRequestService.getAll();
@@ -105,7 +105,7 @@ export const serverRequestController = {
   /**
    * 管理员获取待审批申请
    */
-  async getPendingRequests(req: Request, res: Response) {
+  async getPendingRequests(_req: Request, res: Response) {
     // Admin only
     try {
       const requests = serverRequestService.getPending();
@@ -186,7 +186,7 @@ export const serverRequestController = {
 
       // 通知申请者审批结果
       try {
-        const { getIO } = await import('../socket');
+        const { getIO } = await import('../socket/index.js');
         const io = getIO();
 
         io.to(`user-${updatedRequest.requesterId}`).emit('notification', {

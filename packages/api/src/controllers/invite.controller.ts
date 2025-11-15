@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 
-import { inviteService } from '../services/invite.service';
-import { successResponse, errorResponse } from '../utils/response';
+import { inviteService } from '../services/invite.service.js';
+import { successResponse, errorResponse } from '../utils/response.js';
 
 export const inviteController = {
   /**

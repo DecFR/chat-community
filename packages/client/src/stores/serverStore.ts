@@ -39,6 +39,7 @@ interface ServerState {
   updateChannel: (channelId: string, name: string, description?: string) => Promise<void>;
   deleteChannel: (channelId: string) => Promise<void>;
   deleteServer: (serverId: string) => Promise<void>;
+  leaveServer: (serverId: string) => Promise<void>;
 }
 
 export const useServerStore = create<ServerState>((set, get) => ({
@@ -197,6 +198,20 @@ export const useServerStore = create<ServerState>((set, get) => ({
       }));
     } catch (error) {
       console.error('Failed to delete server:', error);
+      throw error;
+    }
+  },
+
+  leaveServer: async (serverId) => {
+    try {
+      await serverAPI.leaveServer(serverId);
+      set((state) => ({
+        servers: state.servers.filter((s) => s.id !== serverId),
+        currentServerId: state.currentServerId === serverId ? null : state.currentServerId,
+        currentChannelId: state.currentChannelId && state.servers.some(s => s.channels.some(c => c.id === state.currentChannelId && s.id === serverId)) ? null : state.currentChannelId,
+      }));
+    } catch (error) {
+      console.error('Failed to leave server:', error);
       throw error;
     }
   },
