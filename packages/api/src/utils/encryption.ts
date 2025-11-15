@@ -48,11 +48,7 @@ export function decrypt(encryptedText: string): string {
   try {
     const { iv, encryptedData, authTag }: EncryptedData = JSON.parse(encryptedText);
 
-    const decipher = crypto.createDecipheriv(
-      ALGORITHM,
-      KEY_BUFFER,
-      Buffer.from(iv, 'hex')
-    );
+    const decipher = crypto.createDecipheriv(ALGORITHM, KEY_BUFFER, Buffer.from(iv, 'hex'));
 
     decipher.setAuthTag(Buffer.from(authTag, 'hex'));
 
@@ -60,7 +56,7 @@ export function decrypt(encryptedText: string): string {
     decrypted += decipher.final('utf8');
 
     return decrypted;
-  } catch (error) {
+  } catch {
     throw new Error('消息解密失败');
   }
 }

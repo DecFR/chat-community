@@ -1,7 +1,17 @@
+import path from 'path';
+import { fileURLToPath } from 'url';
+
 import { Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
-import { userService } from '../services/user.service';
-import { successResponse, errorResponse } from '../utils/response';
+
+import { friendService } from '../services/friend.service.js';
+import { userService } from '../services/user.service.js';
+import { successResponse, errorResponse } from '../utils/response.js';
+
+// ESM 解析当前文件目录,构造 uploads 绝对路径
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const UPLOAD_DIR = path.resolve(__dirname, '../../uploads');
 
 export const userController = {
   /**
@@ -12,8 +22,9 @@ export const userController = {
       const userId = req.params.id;
       const user = await userService.getUserProfile(userId);
       res.json(successResponse(user));
-    } catch (error: any) {
-      res.status(404).json(errorResponse(error.message));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      res.status(404).json(errorResponse(message));
     }
   },
 
@@ -35,9 +46,33 @@ export const userController = {
         const updates = req.body;
         const user = await userService.updateProfile(userId, updates);
 
+        // 实时通知其他客户端用户资料已更新
+        try {
+          const { getIO } = await import('../socket/index.js');
+          const io = getIO();
+          // 向该用户所有已连接的客户端发送更新事件
+          io.to(`user-${userId}`).emit('userProfileUpdate', user);
+
+          // 通知好友该用户资料已更新
+          const friends = await friendService.getFriends(userId);
+          friends.forEach((friend: { id: string }) => {
+            io.to(`user-${friend.id}`).emit('friendProfileUpdate', {
+              userId,
+              username: user.username,
+              avatarUrl: user.avatarUrl,
+              status: user.status,
+              bio: user.bio,
+            });
+          });
+        } catch {
+          // 忽略通知错误
+        }
+
         res.json(successResponse(user, 'Profile updated successfully'));
-      } catch (error: any) {
-        res.status(400).json(errorResponse(error.message));
+        return;
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'An unknown error occurred';
+        return res.status(400).json(errorResponse(message));
       }
     },
   ],
@@ -60,14 +95,41 @@ export const userController = {
 
       const user = await userService.updateProfile(userId, { avatarUrl });
 
+      // 实时通知其他客户端用户资料已更新
+      try {
+        const { getIO } = await import('../socket/index.js');
+        const io = getIO();
+        // 向该用户所有已连接的客户端发送更新事件
+        io.to(`user-${userId}`).emit('userProfileUpdate', {
+          userId,
+          username: user.username,
+          avatarUrl: user.avatarUrl || null,
+          status: user.status,
+          bio: user.bio,
+        });
+
+        // 通知好友该用户资料已更新
+        const friends = await friendService.getFriends(userId);
+        friends.forEach((friend: { id: string }) => {
+          io.to(`user-${friend.id}`).emit('friendProfileUpdate', {
+            userId,
+            username: user.username,
+            avatarUrl: user.avatarUrl || null,
+            status: user.status,
+            bio: user.bio,
+          });
+        });
+      } catch {
+        // 忽略通知错误
+      }
+
       // 删除旧头像文件（仅删除以 avatar- 前缀命名的本地文件，避免误删消息附件或外链）
       try {
         if (oldAvatar && oldAvatar !== avatarUrl && oldAvatar.startsWith('/uploads/')) {
           const fname = oldAvatar.split('/').pop() || '';
           if (fname.startsWith('avatar-')) {
-            const pathModule = await import('path');
             const fs = await import('fs/promises');
-            const filePath = pathModule.join(__dirname, '../../uploads', fname);
+            const filePath = path.join(UPLOAD_DIR, fname);
             await fs.unlink(filePath).catch(() => {});
           }
         }
@@ -76,8 +138,10 @@ export const userController = {
       }
 
       res.json(successResponse({ avatarUrl: user.avatarUrl }, 'Avatar uploaded successfully'));
-    } catch (error: any) {
-      res.status(400).json(errorResponse(error.message));
+      return;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      return res.status(400).json(errorResponse(message));
     }
   },
 
@@ -89,8 +153,9 @@ export const userController = {
       const userId = req.user!.id;
       const settings = await userService.getUserSettings(userId);
       res.json(successResponse(settings));
-    } catch (error: any) {
-      res.status(404).json(errorResponse(error.message));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      res.status(404).json(errorResponse(message));
     }
   },
 
@@ -104,8 +169,9 @@ export const userController = {
       const settings = await userService.updateUserSettings(userId, updates);
 
       res.json(successResponse(settings, 'Settings updated successfully'));
-    } catch (error: any) {
-      res.status(400).json(errorResponse(error.message));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      res.status(400).json(errorResponse(message));
     }
   },
 
@@ -122,8 +188,10 @@ export const userController = {
 
       const users = await userService.searchUsers(query, req.user!.id);
       res.json(successResponse(users));
-    } catch (error: any) {
-      res.status(400).json(errorResponse(error.message));
+      return;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      return res.status(400).json(errorResponse(message));
     }
   },
 
@@ -145,8 +213,10 @@ export const userController = {
 
       await userService.updatePassword(userId, currentPassword, newPassword);
       res.json(successResponse(null, '密码已更新'));
-    } catch (error: any) {
-      res.status(400).json(errorResponse(error.message));
+      return;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      return res.status(400).json(errorResponse(message));
     }
   },
 
@@ -164,8 +234,10 @@ export const userController = {
 
       const isAvailable = await userService.checkUsernameAvailability(username, currentUserId);
       res.json(successResponse({ available: isAvailable }));
-    } catch (error: any) {
-      res.status(400).json(errorResponse(error.message));
+      return;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      return res.status(400).json(errorResponse(message));
     }
   },
 };

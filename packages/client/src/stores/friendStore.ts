@@ -33,6 +33,7 @@ interface FriendState {
   declineRequest: (friendshipId: string) => Promise<void>;
   removeFriend: (friendshipId: string) => Promise<void>;
   updateFriendStatus: (userId: string, status: string) => void;
+  updateFriendProfile: (userId: string, updates: { username?: string; avatarUrl?: string }) => void;
 }
 
 export const useFriendStore = create<FriendState>((set) => ({
@@ -44,7 +45,11 @@ export const useFriendStore = create<FriendState>((set) => ({
     try {
       set({ isLoading: true });
       const response = await friendAPI.getFriends();
-      const friends = response.data.data;
+      const friends = (response.data.data || []).map((f: any) => ({
+        ...f,
+        // 兼容历史后端字段 avatar -> avatarUrl
+        avatarUrl: f.avatarUrl ?? f.avatar ?? null,
+      }));
       set({ friends, isLoading: false });
     } catch (error) {
       console.error('Failed to load friends:', error);
@@ -114,6 +119,14 @@ export const useFriendStore = create<FriendState>((set) => ({
     set((state) => ({
       friends: state.friends.map((friend) =>
         friend.id === userId ? { ...friend, status } : friend
+      ),
+    }));
+  },
+
+  updateFriendProfile: (userId, updates) => {
+    set((state) => ({
+      friends: state.friends.map((friend) =>
+        friend.id === userId ? { ...friend, ...updates } : friend
       ),
     }));
   },

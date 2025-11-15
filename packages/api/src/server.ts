@@ -1,123 +1,184 @@
-
+import 'dotenv/config';
 import cluster from 'cluster';
 import os from 'os';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+import logger from './utils/logger.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const cpuCores = os.cpus().length;
 const isSingleCore = cpuCores <= 1;
 // 线程数自动为核心数一半，最少1
 const maxThreads = isSingleCore ? 1 : Math.ceil(cpuCores / 2);
+const isDev = (process.env.NODE_ENV || 'development') === 'development';
+const enableCluster = !isDev && !isSingleCore && (process.env.ENABLE_CLUSTER !== 'false');
 
-if (!isSingleCore && cluster.isPrimary) {
-  console.log(`🚀 主进程 ${process.pid} 启动，准备 fork ${maxThreads} 个 worker...`);
+if (enableCluster && cluster.isPrimary) {
+  logger.info(`🚀 主进程 ${process.pid} 启动，准备 fork ${maxThreads} 个 worker...`);
   for (let i = 0; i < maxThreads; i++) {
     cluster.fork();
   }
   cluster.on('exit', (worker, code, signal) => {
-    console.log(`⚠️ Worker ${worker.process.pid} 退出，code=${code}, signal=${signal}，自动重启...`);
+    logger.warn(
+      `⚠️ Worker ${worker.process.pid} 退出，code=${code}, signal=${signal}，自动重启...`
+    );
     cluster.fork();
   });
 } else {
   // Worker 进程运行原有 Express + Socket.IO 服务
-  import('express').then(({ default: express, Application, Request, Response }) => {
-    import('http').then(({ default: http }) => {
-      import('cors').then(({ default: cors }) => {
-        import('helmet').then(({ default: helmet }) => {
-          import('dotenv').then(({ default: dotenv }) => {
-            import('path').then(({ default: path }) => {
-              import('./middleware/auth').then(({ default: passport }) => {
-                import('./socket').then(({ initializeSocket }) => {
-                  import('./routes/auth.routes').then(({ default: authRoutes }) => {
-                    import('./routes/user.routes').then(({ default: userRoutes }) => {
-                      import('./routes/friend.routes').then(({ default: friendRoutes }) => {
-                        import('./routes/server.routes').then(({ default: serverRoutes }) => {
-                          import('./routes/message.routes').then(({ default: messageRoutes }) => {
-                            import('./routes/admin.routes').then(({ default: adminRoutes }) => {
-                              import('./routes/serverRequest.routes').then(({ default: serverRequestRoutes }) => {
-                                import('./routes/invite.routes').then(({ default: inviteRoutes }) => {
-                                  import('./utils/avatarCleanupScheduler').then(({ startAvatarCleanupScheduler }) => {
-                                    dotenv.config();
-                                    const PORT = process.env.PORT || 3000;
-                                    const app: Application = express();
-                                    const httpServer = http.createServer(app);
-                                    app.use(helmet());
-                                    app.use(cors({
-                                      origin: (origin, callback) => {
-                                        const allowed = process.env.CLIENT_URL || 'http://localhost:5173';
-                                        const isDev = (process.env.NODE_ENV || 'development') === 'development';
-                                        if (!origin) return callback(null, true);
-                                        if (origin === allowed) return callback(null, true);
-                                        if (isDev && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) {
-                                          return callback(null, true);
-                                        }
-                                        return callback(new Error(`CORS blocked for origin: ${origin}`));
-                                      },
-                                      credentials: true,
-                                    }));
-                                    app.use(express.json());
-                                    app.use(express.urlencoded({ extended: true }));
-                                    app.use(passport.initialize());
-                                    app.use('/uploads', cors({
-                                      origin: '*',
-                                      methods: ['GET', 'HEAD', 'OPTIONS'],
-                                      credentials: false,
-                                    }), express.static(path.join(__dirname, '../uploads')));
-                                    app.use('/api/auth', authRoutes);
-                                    app.use('/api/users', userRoutes);
-                                    app.use('/api/friends', friendRoutes);
-                                    app.use('/api/servers', serverRoutes);
-                                    app.use('/api/messages', messageRoutes);
-                                    app.use('/api/invites', inviteRoutes);
-                                    app.use('/api/admin', adminRoutes);
-                                    app.use('/api/server-requests', serverRequestRoutes);
-                                    app.get('/health', (_req: Request, res: Response) => {
-                                      res.json({ status: 'ok', message: 'Chat & Community API is running' });
-                                    });
-                                    app.use((_req: Request, res: Response) => {
-                                      res.status(404).json({ success: false, error: 'Route not found' });
-                                    });
-                                    app.use((err: any, _req: Request, res: Response, _next: any) => {
-                                      console.error('Error:', err);
-                                      res.status(err.status || 500).json({
-                                        success: false,
-                                        error: err.message || 'Internal server error',
-                                      });
-                                    });
-                                    initializeSocket(httpServer);
-                                    import('./utils/perfMonitor').then(({ startPerfMonitor }) => {
-                                      // 单核时不启用多线程/多进程
-                                      if (!isSingleCore) {
-                                        process.env.THREAD_POOL_MAX_THREADS = String(maxThreads);
-                                      } else {
-                                        process.env.THREAD_POOL_MAX_THREADS = '1';
-                                      }
-                                      startPerfMonitor();
-                                      httpServer.listen(PORT, () => {
-                                        console.log(`🚀 Worker ${process.pid} running on http://localhost:${PORT}`);
-                                        startAvatarCleanupScheduler().catch((e) => console.error('Failed to start cleanup scheduler', e));
-                                      });
-                                    });
-                                    process.on('SIGTERM', () => {
-                                      console.log('SIGTERM received, shutting down gracefully...');
-                                      httpServer.close(() => {
-                                        console.log('Server closed');
-                                        process.exit(0);
-                                      });
-                                    });
-                                  });
-                                });
-                              });
-                            });
-                          });
-                        });
-                      });
-                    });
-                  });
-                });
-              });
-            });
+  Promise.all([
+    import('express'),
+    import('http'),
+    import('cors'),
+    import('helmet'),
+    import('passport'),
+    import('./middleware/auth.js'),
+    import('./socket/index.js'),
+    import('./routes/auth.routes.js'),
+    import('./routes/user.routes.js'),
+    import('./routes/friend.routes.js'),
+    import('./routes/server.routes.js'),
+    import('./routes/message.routes.js'),
+    import('./routes/admin.routes.js'),
+    import('./routes/serverRequest.routes.js'),
+    import('./routes/invite.routes.js'),
+    import('./utils/avatarCleanupScheduler.js'),
+    import('./utils/perfMonitor.js'),
+  ])
+    .then(
+      ([
+        { default: express },
+        { default: http },
+        { default: cors },
+        { default: helmet },
+        { default: passport },
+        _authMiddlewareModule, // auth.js (unused)
+        socketModule, // socket.js
+        { default: authRoutes },
+        { default: userRoutes },
+        { default: friendRoutes },
+        { default: serverRoutes },
+        { default: messageRoutes },
+        { default: adminRoutes },
+        { default: serverRequestRoutes },
+        { default: inviteRoutes },
+        { startAvatarCleanupScheduler },
+        { startPerfMonitor },
+      ]) => {
+        const { initializeSocket } = socketModule;
+        // 注意：authMiddlewareModule 包含 passport 本身，因为它是这样导出的
+        // 我们在这里不需要直接使用它，因为 passport.initialize() 会处理
+        const PORT = process.env.PORT || 3000;
+        const app: import('express').Application = express();
+        const httpServer = http.createServer(app);
+        app.use(helmet({
+          contentSecurityPolicy: {
+            directives: {
+              ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+              "img-src": ["'self'", "data:", "blob:", "http://localhost:3000", "http://localhost:5173"],
+            },
+          },
+        }));
+        app.use(
+          cors({
+            origin: (origin, callback) => {
+              const allowed = process.env.CLIENT_URL || 'http://localhost:5173';
+              const isDev = (process.env.NODE_ENV || 'development') === 'development';
+              if (!origin) return callback(null, true);
+              if (origin === allowed) return callback(null, true);
+              if (isDev && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) {
+                return callback(null, true);
+              }
+              return callback(new Error(`CORS blocked for origin: ${origin}`));
+            },
+            credentials: true,
+          })
+        );
+        app.use(express.json());
+        app.use(express.urlencoded({ extended: true }));
+        app.use(passport.initialize());
+        
+        // 静态文件服务 - uploads目录
+        const uploadsPath = path.join(__dirname, '../uploads');
+        console.log('[Static Files] Serving /uploads from:', uploadsPath);
+        app.use(
+          '/uploads',
+          cors({
+            origin: '*',
+            methods: ['GET', 'HEAD', 'OPTIONS'],
+            credentials: false,
+          }),
+          express.static(uploadsPath)
+        );
+        app.use('/api/auth', authRoutes);
+        app.use('/api/users', userRoutes);
+        app.use('/api/friends', friendRoutes);
+        app.use('/api/servers', serverRoutes);
+        app.use('/api/messages', messageRoutes);
+        app.use('/api/invites', inviteRoutes);
+        app.use('/api/admin', adminRoutes);
+        app.use('/api/server-requests', serverRequestRoutes);
+        app.get('/health', (_req: import('express').Request, res: import('express').Response) => {
+          res.json({
+            status: 'ok',
+            message: 'Chat & Community API is running',
           });
         });
-      });
+        app.use((_req: import('express').Request, res: import('express').Response) => {
+          res.status(404).json({
+            success: false,
+            error: 'Route not found',
+          });
+        });
+
+        interface HttpError extends Error {
+          status?: number;
+        }
+
+        app.use(
+          (
+            err: HttpError,
+            _req: import('express').Request,
+            res: import('express').Response,
+            _next: import('express').NextFunction
+          ) => {
+            logger.error('Error:', err);
+            res.status(err.status || 500).json({
+              success: false,
+              error: err.message || 'Internal server error',
+            });
+          }
+        );
+        initializeSocket(httpServer);
+
+        // 单核时不启用多线程/多进程
+        if (!isSingleCore) {
+          process.env.THREAD_POOL_MAX_THREADS = String(maxThreads);
+        } else {
+          process.env.THREAD_POOL_MAX_THREADS = '1';
+        }
+        startPerfMonitor();
+        httpServer.listen(PORT, () => {
+          logger.info(`🚀 Worker ${process.pid} running on http://localhost:${PORT}`);
+          startAvatarCleanupScheduler().catch((e: unknown) =>
+            logger.error('Failed to start cleanup scheduler', e)
+          );
+        });
+
+        process.on('SIGTERM', () => {
+          logger.info('SIGTERM received, shutting down gracefully...');
+          httpServer.close(() => {
+            logger.info('Server closed');
+            process.exit(0);
+          });
+        });
+      }
+    )
+    .catch((error) => {
+      logger.error('Failed to load modules:', error);
+      process.exit(1);
     });
-  });
 }

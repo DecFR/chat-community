@@ -55,19 +55,19 @@ export const UserAvatar: React.FC<UserAvatarProps> = ({
 
   const sizeClass = sizeClasses[size];
 
-  // 构建完整的头像URL
+  // 构建完整的头像URL（头像文件名每次上传都会变化，无需时间戳防缓存）
   const getAvatarUrl = (url: string | null | undefined): string | null => {
     if (!url) return null;
+    // 支持 data/blob 协议
+    if (url.startsWith('data:') || url.startsWith('blob:')) return url;
     // 如果是完整URL，直接返回
-    if (url.startsWith('http://') || url.startsWith('https://')) {
-      return url;
-    }
+    if (url.startsWith('http://') || url.startsWith('https://')) return url;
     // 如果是相对路径，补全API_URL
-    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
-    const baseUrl = API_URL.replace('/api', ''); // 移除 /api 后缀
-    // 添加时间戳防止缓存
-    const timestamp = new Date().getTime();
-    return `${baseUrl}${url}?t=${timestamp}`;
+    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+    const baseUrl = API_URL.endsWith('/api') ? API_URL.replace('/api', '') : API_URL; // 移除 /api 后缀
+    // 兼容缺少前导斜杠的路径
+    const normalized = url.startsWith('/') ? url : `/${url}`;
+    return `${baseUrl}${normalized}`;
   };
 
   const fullAvatarUrl = getAvatarUrl(avatarUrl);

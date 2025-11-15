@@ -1,9 +1,14 @@
-
-import { Worker } from 'worker_threads';
-import { getAvatarCleanupConfig } from './config';
 import path from 'path';
+import { fileURLToPath } from 'url';
+import { Worker } from 'worker_threads';
 
-let timer: NodeJS.Timer | null = null;
+import { getAvatarCleanupConfig } from './config.js';
+import logger from './logger.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+let timer: NodeJS.Timeout | null = null;
 
 function runCleanupInWorker(maxAgeMs: number): Promise<{ removed: number }> {
   return new Promise((resolve) => {
@@ -27,14 +32,14 @@ export async function startAvatarCleanupScheduler() {
   timer = setInterval(async () => {
     const res = await runCleanupInWorker(maxAgeMs);
     if (res.removed) {
-      console.log(`🧹 Cleanup avatars removed: ${res.removed}`);
+      logger.info(`🧹 Cleanup avatars removed: ${res.removed}`);
     }
   }, intervalMs);
 
   // 首次延迟执行一次
   setTimeout(() => {
     runCleanupInWorker(maxAgeMs).then((r) => {
-      if (r.removed) console.log(`🧹 Cleanup avatars removed: ${r.removed}`);
+      if (r.removed) logger.info(`🧹 Cleanup avatars removed: ${r.removed}`);
     });
   }, 10_000);
 }

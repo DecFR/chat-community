@@ -1,8 +1,9 @@
 import { Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
+
 import { friendService } from '../services/friend.service';
-import { successResponse, errorResponse } from '../utils/response';
 import { getIO } from '../socket';
+import { successResponse, errorResponse } from '../utils/response';
 
 export const friendController = {
   /**
@@ -22,9 +23,23 @@ export const friendController = {
         const { receiverId } = req.body;
 
         const friendship = await friendService.sendFriendRequest(senderId, receiverId);
+
+        // 通过 Socket.IO 通知接收方
+        const io = getIO();
+        io.to(`user-${receiverId}`).emit('newFriendRequest', {
+          ...friendship,
+          sender: {
+            id: friendship.sender.id,
+            username: friendship.sender.username,
+            avatarUrl: friendship.sender.avatarUrl,
+            status: friendship.sender.status,
+          },
+        });
+
         res.status(201).json(successResponse(friendship, 'Friend request sent'));
-      } catch (error: any) {
-        res.status(400).json(errorResponse(error.message));
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'An unknown error occurred';
+        res.status(400).json(errorResponse(message));
       }
     },
   ],
@@ -38,7 +53,7 @@ export const friendController = {
       const friendshipId = req.params.id;
 
       const friendship = await friendService.acceptFriendRequest(userId, friendshipId);
-      
+
       // 通过 Socket.IO 通知申请方好友请求已被接受
       const io = getIO();
       io.to(`user-${friendship.senderId}`).emit('friendRequestAccepted', {
@@ -51,9 +66,21 @@ export const friendController = {
         },
       });
       
+      // 也通知接受者本人更新好友列表
+      io.to(`user-${userId}`).emit('friendRequestAccepted', {
+        friendshipId: friendship.id,
+        friend: {
+          id: friendship.sender.id,
+          username: friendship.sender.username,
+          avatarUrl: friendship.sender.avatarUrl,
+          status: friendship.sender.status,
+        },
+      });
+
       res.json(successResponse(friendship, 'Friend request accepted'));
-    } catch (error: any) {
-      res.status(400).json(errorResponse(error.message));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      res.status(400).json(errorResponse(message));
     }
   },
 
@@ -65,10 +92,18 @@ export const friendController = {
       const userId = req.user!.id;
       const friendshipId = req.params.id;
 
-      await friendService.declineFriendRequest(userId, friendshipId);
+      const friendship = await friendService.declineFriendRequest(userId, friendshipId);
+
+      // 通过 Socket.IO 通知申请方好友请求已被拒绝
+      const io = getIO();
+      io.to(`user-${friendship.senderId}`).emit('friendRequestDeclined', {
+        friendshipId: friendship.id,
+      });
+
       res.json(successResponse(null, 'Friend request declined'));
-    } catch (error: any) {
-      res.status(400).json(errorResponse(error.message));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      res.status(400).json(errorResponse(message));
     }
   },
 
@@ -80,8 +115,9 @@ export const friendController = {
       const userId = req.user!.id;
       const friends = await friendService.getFriends(userId);
       res.json(successResponse(friends));
-    } catch (error: any) {
-      res.status(400).json(errorResponse(error.message));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      res.status(400).json(errorResponse(message));
     }
   },
 
@@ -93,8 +129,9 @@ export const friendController = {
       const userId = req.user!.id;
       const requests = await friendService.getPendingRequests(userId);
       res.json(successResponse(requests));
-    } catch (error: any) {
-      res.status(400).json(errorResponse(error.message));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      res.status(400).json(errorResponse(message));
     }
   },
 
@@ -106,10 +143,23 @@ export const friendController = {
       const userId = req.user!.id;
       const friendshipId = req.params.id;
 
-      await friendService.removeFriend(userId, friendshipId);
+      const { friendId } = await friendService.removeFriend(userId, friendshipId);
+
+      // 通过 Socket.IO 通知双方已被删除
+      const io = getIO();
+      io.to(`user-${friendId}`).emit('friendRemoved', {
+        friendshipId,
+        friendId: userId, // 谁删除了我
+      });
+      io.to(`user-${userId}`).emit('friendRemoved', {
+        friendshipId,
+        friendId: friendId, // 我删除了谁
+      });
+
       res.json(successResponse(null, 'Friend removed'));
-    } catch (error: any) {
-      res.status(400).json(errorResponse(error.message));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      res.status(400).json(errorResponse(message));
     }
   },
 };

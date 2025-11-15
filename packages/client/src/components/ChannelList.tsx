@@ -4,14 +4,38 @@ import { useNavigate } from 'react-router-dom';
 import { UserAvatar } from './UserAvatar';
 import { useAuthStore } from '../stores/authStore';
 import { useState, useEffect } from 'react';
-import FriendsPanel from './FriendsPanel';
 import FriendRequestsPanel from './FriendRequestsPanel';
 import UserSearchModal from './UserSearchModal';
 import { useUnreadStore } from '../stores/unreadStore';
 import ServerManagementModal from './ServerManagementModal';
+import { socketService } from '../lib/socket';
+
+interface Channel {
+  id: string;
+  name: string;
+  description?: string;
+  type: string;
+  serverId: string;
+}
+
+interface Server {
+  id: string;
+  name: string;
+  description?: string;
+  imageUrl?: string;
+  ownerId: string;
+  owner: { username: string };
+  channels: Channel[];
+  createdAt: string;
+  isPublic?: boolean;
+  _count?: {
+    members: number;
+    channels: number;
+  };
+}
 
 export default function ChannelList() {
-  const { servers, currentServerId, currentChannelId, selectChannel, createChannel, updateChannel, deleteChannel, isLoading } = useServerStore();
+  const { servers, currentServerId, currentChannelId, selectChannel, createChannel, updateChannel, deleteChannel, isLoading, loadServers } = useServerStore();
   const { friends, removeFriend, loadFriends, loadPendingRequests } = useFriendStore();
   const { user } = useAuthStore();
   const { channelUnread, dmUnreadByFriend } = useUnreadStore();
@@ -26,6 +50,56 @@ export default function ChannelList() {
   const [showServerManage, setShowServerManage] = useState(false);
 
   const currentServer = servers.find((s) => s.id === currentServerId);
+
+  // Socket实时更新监听
+  useEffect(() => {
+    const socket = socketService.getSocket();
+    if (!socket || !currentServerId) return;
+
+    // 监听频道创建
+    const handleChannelCreate = (data: { serverId: string; channel: Channel }) => {
+      if (data.serverId === currentServerId) {
+        loadServers(); // 刷新服务器列表以获取新频道
+      }
+    };
+
+    // 监听频道更新
+    const handleChannelUpdate = (data: { serverId: string; channelId: string; channel: Channel }) => {
+      if (data.serverId === currentServerId) {
+        loadServers();
+      }
+    };
+
+    // 监听频道删除
+    const handleChannelDelete = (data: { serverId: string; channelId: string }) => {
+      if (data.serverId === currentServerId) {
+        loadServers();
+        // 如果删除的是当前频道,返回主页
+        if (data.channelId === currentChannelId) {
+          navigate('/app');
+        }
+      }
+    };
+
+    // 监听服务器更新
+    const handleServerUpdate = (data: { serverId: string; server: Server }) => {
+      if (data.serverId === currentServerId) {
+        loadServers();
+      }
+    };
+
+    socket.on('channelCreate', handleChannelCreate);
+    socket.on('channelUpdate', handleChannelUpdate);
+    socket.on('channelDelete', handleChannelDelete);
+    socket.on('serverUpdate', handleServerUpdate);
+
+    return () => {
+      socket.off('channelCreate', handleChannelCreate);
+      socket.off('channelUpdate', handleChannelUpdate);
+      socket.off('channelDelete', handleChannelDelete);
+      socket.off('serverUpdate', handleServerUpdate);
+    };
+  }, [currentServerId, loadServers, navigate, currentChannelId]);
 
   // 当切换到好友视图时，刷新好友列表
   useEffect(() => {
@@ -314,7 +388,8 @@ export default function ChannelList() {
     <div className="w-60 bg-discord-darker flex flex-col">
       <div className="h-12 border-b border-discord-darkest flex items-center justify-between px-4 font-semibold text-white shadow-md">
         <span className="truncate" title={currentServer?.name}>{currentServer?.name || '服务器'}</span>
-        {(user?.role === 'ADMIN' || currentServer.ownerId === user?.id) && (
+        {/* 公共服务器不显示服务器设置按钮,私有服务器的owner和admin可以管理 */}
+        {!currentServer.isPublic && (user?.role === 'ADMIN' || currentServer.ownerId === user?.id) && (
           <button
             onClick={() => setShowServerManage(true)}
             className="p-1 rounded hover:bg-discord-darkest"
@@ -332,15 +407,18 @@ export default function ChannelList() {
         <div className="p-2 space-y-1">
           <div className="text-xs font-semibold text-gray-400 px-2 py-1 flex items-center justify-between">
             <span>频道</span>
-            <button
-              onClick={() => setIsCreatingChannel(true)}
-              className="hover:text-white transition-colors"
-              title="创建频道"
-            >
-              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
-              </svg>
-            </button>
+            {/* 公共服务器只有ADMIN可以创建频道,私有服务器的owner和admin可以创建 */}
+            {(currentServer.isPublic ? user?.role === 'ADMIN' : (user?.role === 'ADMIN' || currentServer.ownerId === user?.id)) && (
+              <button
+                onClick={() => setIsCreatingChannel(true)}
+                className="hover:text-white transition-colors"
+                title="创建频道"
+              >
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" />
+                </svg>
+              </button>
+            )}
           </div>
 
           {isCreatingChannel && (
@@ -429,7 +507,8 @@ export default function ChannelList() {
                         {channelUnread[channel.id]}
                       </span>
                     )}
-                    {(user?.role === 'ADMIN' || currentServer.ownerId === user?.id) && (
+                    {/* 公共服务器只有ADMIN可以管理频道,私有服务器的owner和admin可以管理 */}
+                    {(currentServer.isPublic ? user?.role === 'ADMIN' : (user?.role === 'ADMIN' || currentServer.ownerId === user?.id)) && (
                       <div
                         onClick={(e) => {
                           e.stopPropagation();

@@ -1,6 +1,8 @@
 import { Router } from 'express';
+
 import { authController } from '../controllers/auth.controller';
 import { authMiddleware } from '../middleware/auth';
+import logger from '../utils/logger';
 
 const router = Router();
 
@@ -22,7 +24,7 @@ router.get('/check-users', async (_req, res) => {
     const userCount = await prisma.user.count();
     res.json({ success: true, data: { hasUsers: userCount > 0 } });
   } catch (error) {
-    console.error('Check users error:', error);
+    logger.error('Check users error:', { error });
     res.status(500).json({ success: false, error: '检查用户失败' });
   }
 });

@@ -18,6 +18,7 @@ export interface Server {
   owner: { username: string };
   channels: Channel[];
   createdAt: string;
+  isPublic?: boolean;
   _count?: {
     members: number;
     channels: number;

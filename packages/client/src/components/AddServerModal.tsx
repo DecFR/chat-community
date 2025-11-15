@@ -234,7 +234,7 @@ export default function AddServerModal({ isOpen, onClose }: AddServerModalProps)
                   {searchResults.length === 0 ? (
                     <div className="text-center py-8 text-gray-400">
                       <p>暂无可加入的服务器</p>
-                      <p className="text-sm mt-2">请向服务器管理员索取邀请码</p>
+                      <p className="text-sm mt-2">可以创建自己的服务器，或稍后再试（公开服务器开放申请后即会出现在搜索结果）。</p>
                     </div>
                   ) : (
                     searchResults.map((server) => (
@@ -269,8 +269,8 @@ export default function AddServerModal({ isOpen, onClose }: AddServerModalProps)
                                 setIsLoading(true);
                                 await serverAPI.createJoinRequest(server.id, r.trim() || undefined);
                                 alert('申请已提交,等待服务器创建者审核');
-                                // 刷新搜索结果
-                                await handleSearch();
+                                // 不刷新搜索结果，避免UI消失
+                                // 用户可以手动刷新或关闭弹窗
                               } catch (err: unknown) {
                                 console.error('提交加入申请失败:', err);
                                 const msg = err instanceof Error && 'response' in err

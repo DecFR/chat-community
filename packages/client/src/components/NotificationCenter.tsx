@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNotificationStore } from '../stores/notificationStore';
+import { useNotificationStore, type NotificationType } from '../stores/notificationStore';
 import { useNavigate } from 'react-router-dom';
 
 export default function NotificationCenter() {
@@ -48,7 +48,7 @@ export default function NotificationCenter() {
     clearStore();
   };
 
-  const getNotificationIcon = (type: Notification['type']) => {
+  const getNotificationIcon = (type: NotificationType) => {
     switch (type) {
       case 'friend_request':
         return (
@@ -100,7 +100,7 @@ export default function NotificationCenter() {
     }
   };
 
-  const getNotificationColor = (type: Notification['type']) => {
+  const getNotificationColor = (type: NotificationType) => {
     switch (type) {
       case 'friend_request':
         return 'border-l-4 border-blue-500';

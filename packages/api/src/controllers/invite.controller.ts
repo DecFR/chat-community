@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+
 import { inviteService } from '../services/invite.service';
 import { successResponse, errorResponse } from '../utils/response';
 
@@ -14,8 +15,9 @@ export const inviteController = {
       const inviteCode = await inviteService.generateUserInviteCode(userId, expiresInDays);
 
       res.json(successResponse(inviteCode, 'User invite code generated successfully'));
-    } catch (error: any) {
-      res.status(400).json(errorResponse(error.message));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      res.status(400).json(errorResponse(message));
     }
   },
 
@@ -28,8 +30,9 @@ export const inviteController = {
       const inviteCodes = await inviteService.getUserInviteCodes(userId);
 
       res.json(successResponse(inviteCodes));
-    } catch (error: any) {
-      res.status(400).json(errorResponse(error.message));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      res.status(400).json(errorResponse(message));
     }
   },
 
@@ -44,8 +47,9 @@ export const inviteController = {
       await inviteService.deleteUserInviteCode(id, userId);
 
       res.json(successResponse(null, 'Invite code deleted successfully'));
-    } catch (error: any) {
-      res.status(400).json(errorResponse(error.message));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      res.status(400).json(errorResponse(message));
     }
   },
 
@@ -63,8 +67,9 @@ export const inviteController = {
       const inviteCode = await inviteService.validateUserInviteCode(code);
 
       res.json(successResponse({ valid: true, inviteCode }));
-    } catch (error: any) {
-      res.status(400).json(errorResponse(error.message));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      res.status(400).json(errorResponse(message));
     }
   },
 
@@ -82,8 +87,9 @@ export const inviteController = {
       const inviteCode = await inviteService.generateServerInviteCode(serverId, expiresInDays);
 
       res.json(successResponse(inviteCode, 'Server invite code generated successfully'));
-    } catch (error: any) {
-      res.status(400).json(errorResponse(error.message));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      res.status(400).json(errorResponse(message));
     }
   },
 
@@ -96,8 +102,9 @@ export const inviteController = {
       const inviteCodes = await inviteService.getServerInviteCodes(serverId);
 
       res.json(successResponse(inviteCodes));
-    } catch (error: any) {
-      res.status(400).json(errorResponse(error.message));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      res.status(400).json(errorResponse(message));
     }
   },
 
@@ -116,8 +123,9 @@ export const inviteController = {
       await inviteService.deleteServerInviteCode(id, serverId);
 
       res.json(successResponse(null, 'Server invite code deleted successfully'));
-    } catch (error: any) {
-      res.status(400).json(errorResponse(error.message));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      res.status(400).json(errorResponse(message));
     }
   },
 
@@ -132,8 +140,9 @@ export const inviteController = {
       const server = await inviteService.joinServerByInviteCode(code, userId);
 
       res.json(successResponse(server, 'Successfully joined the server'));
-    } catch (error: any) {
-      res.status(400).json(errorResponse(error.message));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      res.status(400).json(errorResponse(message));
     }
   },
 };

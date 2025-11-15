@@ -1,6 +1,8 @@
 import { io, Socket } from 'socket.io-client';
+import { useAuthStore } from '../stores/authStore';
 
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3000';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const SOCKET_URL = API_URL.replace('/api', ''); // 移除 /api 后缀获取Socket.io服务器URL
 
 class SocketService {
   private socket: Socket | null = null;
@@ -17,6 +19,7 @@ class SocketService {
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionAttempts: 5,
+      transports: ['polling', 'websocket'],
     });
 
     this.socket.on('connect', () => {
@@ -29,6 +32,17 @@ class SocketService {
 
     this.socket.on('error', (error) => {
       console.error('Socket error:', error);
+    });
+
+    // 全局监听自身资料更新，直接写入 authStore，保证任何界面都实时更新
+    this.socket.on('userProfileUpdate', (data: { userId: string; avatarUrl?: string; username?: string }) => {
+      const current = useAuthStore.getState().user;
+      if (current && current.id === data.userId) {
+        useAuthStore.getState().updateUser({
+          ...(data.avatarUrl !== undefined && { avatarUrl: data.avatarUrl }),
+          ...(data.username && { username: data.username })
+        });
+      }
     });
 
     return this.socket;

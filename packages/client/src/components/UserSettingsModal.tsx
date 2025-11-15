@@ -21,6 +21,11 @@ interface ServerRequest {
   createdAt: string;
 }
 
+interface SocketNotification {
+  type: 'server_request_result' | 'friend_request' | 'friend_request_accepted' | string; // 允许多种通知类型
+  data?: unknown; // 根据不同通知类型，data结构可能不同
+}
+
 type Tab = 'profile' | 'appearance' | 'privacy' | 'serverRequests';
 
 // Toast通知组件
@@ -99,7 +104,7 @@ export default function UserSettingsModal({
   useEffect(() => {
     if (!isOpen) return;
 
-    const handleNotification = (notification: any) => {
+    const handleNotification = (notification: SocketNotification) => {
       try {
         if (notification.type === 'server_request_result') {
           console.log('[UserSettings] 收到服务器申请结果通知，刷新列表');
@@ -226,8 +231,11 @@ export default function UserSettingsModal({
         setAvatarFile(null);
         setAvatarPreview(null);
       }, 500);
-    } catch (err: any) {
-      setToast({ message: err.response?.data?.error || err.response?.data?.message || '更新失败', type: 'error' });
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error && 'response' in err 
+        ? ((err as { response?: { data?: { error?: string, message?: string } } }).response?.data?.error || (err as { response?: { data?: { error?: string, message?: string } } }).response?.data?.message || '更新失败')
+        : '更新失败';
+      setToast({ message: errorMessage, type: 'error' });
     } finally {
       setIsLoading(false);
     }
@@ -256,8 +264,11 @@ export default function UserSettingsModal({
           body.classList.remove('light-theme');
         }
       }
-    } catch (err: any) {
-      setToast({ message: err.response?.data?.error || err.response?.data?.message || '更新失败', type: 'error' });
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error && 'response' in err
+        ? ((err as { response?: { data?: { error?: string, message?: string } } }).response?.data?.error || (err as { response?: { data?: { error?:string, message?: string } } }).response?.data?.message || '更新失败')
+        : '更新失败';
+      setToast({ message: errorMessage, type: 'error' });
     } finally {
       setIsLoading(false);
     }
@@ -271,8 +282,11 @@ export default function UserSettingsModal({
       await userAPI.updateSettings({ friendRequestPrivacy });
       await refreshUser();
       setToast({ message: '隐私设置已更新', type: 'success' });
-    } catch (err: any) {
-      setToast({ message: err.response?.data?.error || '更新失败', type: 'error' });
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error && 'response' in err
+        ? ((err as { response?: { data?: { error?: string } } }).response?.data?.error || '更新失败')
+        : '更新失败';
+      setToast({ message: errorMessage, type: 'error' });
     } finally {
       setIsLoading(false);
     }
@@ -360,7 +374,7 @@ export default function UserSettingsModal({
                         if (!response.data.available) {
                           setUsernameError('用户名已被使用');
                         }
-                      } catch (err) {
+                      } catch (err: unknown) {
                         console.error('检测用户名失败:', err);
                       } finally {
                         setIsCheckingUsername(false);
@@ -414,8 +428,11 @@ export default function UserSettingsModal({
                   try {
                     await userAPI.updatePassword({ currentPassword, newPassword });
                     setToast({ message: '密码已更新', type: 'success' });
-                  } catch (err: any) {
-                    setToast({ message: err.response?.data?.error || '密码更新失败', type: 'error' });
+                  } catch (err: unknown) {
+                    const errorMessage = err instanceof Error && 'response' in err
+                      ? ((err as { response?: { data?: { error?: string } } }).response?.data?.error || '密码更新失败')
+                      : '密码更新失败';
+                    setToast({ message: errorMessage, type: 'error' });
                   }
                 }}
                 type="button"
@@ -600,7 +617,7 @@ export default function UserSettingsModal({
             ) : serverRequests.length === 0 ? (
               <div className="text-center py-12">
                 <svg className="w-16 h-16 mx-auto text-gray-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
                 </svg>
                 <p className="text-gray-400">暂无服务器申请记录</p>
                 <p className="text-sm text-gray-500 mt-2">在"创建/查找服务器"中提交申请后将在此显示</p>
@@ -728,16 +745,18 @@ export default function UserSettingsModal({
           >
             隐私设置
           </button>
-          <button
-            onClick={() => handleTabChange('serverRequests')}
-            className={`w-full text-left px-4 py-2 rounded transition-colors ${
-              activeTab === 'serverRequests'
-                ? 'bg-discord-hover text-white'
-                : 'text-gray-400 hover:bg-discord-hover hover:text-white'
-            }`}
-          >
-            服务器申请
-          </button>
+          {user.role !== 'ADMIN' && (
+            <button
+              onClick={() => handleTabChange('serverRequests')}
+              className={`w-full text-left px-4 py-2 rounded transition-colors ${
+                activeTab === 'serverRequests'
+                  ? 'bg-discord-hover text-white'
+                  : 'text-gray-400 hover:bg-discord-hover hover:text-white'
+              }`}
+            >
+              服务器申请
+            </button>
+          )}
 
           {/* 管理员入口 */}
           <div className="pt-4 mt-4 border-t border-gray-700">
@@ -757,7 +776,7 @@ export default function UserSettingsModal({
             {activeTab === 'profile' && '个人资料'}
             {activeTab === 'appearance' && '外观设置'}
             {activeTab === 'privacy' && '隐私设置'}
-            {activeTab === 'serverRequests' && '服务器申请'}
+            {activeTab === 'serverRequests' && user.role !== 'ADMIN' && '服务器申请'}
           </h2>
 
           {renderTabContent()}

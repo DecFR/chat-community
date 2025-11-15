@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
 import { UserAvatar } from './UserAvatar';
 import { socketService } from '../lib/socket';
+import api from '../lib/api';
 
 interface Member {
   id: string;
@@ -13,7 +14,7 @@ interface Member {
 }
 
 export default function MemberList() {
-  const { currentServerId, currentChannelId, servers } = useServerStore();
+  const { currentServerId, currentChannelId } = useServerStore();
   const location = useLocation();
   const [members, setMembers] = useState<Member[]>([]);
 
@@ -26,13 +27,8 @@ export default function MemberList() {
       }
 
       try {
-        const response = await fetch(`http://localhost:3000/api/servers/${currentServerId}/members`, {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          },
-        });
-        const data = await response.json();
-        if (data.success) {
+        const { data } = await api.get(`/servers/${currentServerId}/members`);
+        if (data?.success) {
           setMembers(data.data);
         }
       } catch (error) {
@@ -44,7 +40,7 @@ export default function MemberList() {
     loadMembers();
 
     // 监听服务器成员更新事件
-    const handleMemberUpdate = (data: any) => {
+    const handleMemberUpdate = (data: { serverId: string; userId: string; status?: 'ONLINE'|'IDLE'|'DO_NOT_DISTURB'|'OFFLINE'; action?: 'online'|'offline' }) => {
       // 只处理当前服务器的成员更新
       if (data.serverId !== currentServerId) return;
 
@@ -70,8 +66,28 @@ export default function MemberList() {
 
     socketService.on('serverMemberUpdate', handleMemberUpdate);
 
+    // 监听好友资料更新,实时刷新成员列表中的头像和用户名
+    const handleProfileUpdate = (data: { userId: string; avatarUrl?: string; username?: string }) => {
+      setMembers((prevMembers) =>
+        prevMembers.map((member) =>
+          member.id === data.userId
+            ? {
+                ...member,
+                ...(data.avatarUrl !== undefined && { avatarUrl: data.avatarUrl }),
+                ...(data.username && { username: data.username }),
+              }
+            : member
+        )
+      );
+    };
+
+    socketService.on('friendProfileUpdate', handleProfileUpdate);
+    socketService.on('userProfileUpdate', handleProfileUpdate);
+
     return () => {
       socketService.off('serverMemberUpdate', handleMemberUpdate);
+      socketService.off('friendProfileUpdate', handleProfileUpdate);
+      socketService.off('userProfileUpdate', handleProfileUpdate);
     };
   }, [currentServerId]);
 

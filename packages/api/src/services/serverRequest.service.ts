@@ -1,7 +1,12 @@
 // 服务器申请临时存储(未来迁移到数据库)
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
 import { nanoid } from 'nanoid';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const REQUESTS_FILE = path.join(__dirname, '../../data/server-requests.json');
 
@@ -46,7 +51,13 @@ export const serverRequestService = {
   /**
    * 创建服务器申请
    */
-  create(requesterId: string, requesterName: string, name: string, description: string | undefined, reason: string): ServerRequest {
+  create(
+    requesterId: string,
+    requesterName: string,
+    name: string,
+    description: string | undefined,
+    reason: string
+  ): ServerRequest {
     const requests = readRequests();
     const newRequest: ServerRequest = {
       id: nanoid(),
@@ -75,22 +86,28 @@ export const serverRequestService = {
    * 获取待审批的申请
    */
   getPending(): ServerRequest[] {
-    return readRequests().filter(r => r.status === 'PENDING');
+    return readRequests().filter((r) => r.status === 'PENDING');
   },
 
   /**
    * 获取用户的申请
    */
   getByUser(userId: string): ServerRequest[] {
-    return readRequests().filter(r => r.requesterId === userId);
+    return readRequests().filter((r) => r.requesterId === userId);
   },
 
   /**
    * 审批申请
    */
-  review(requestId: string, reviewerId: string, approved: boolean, reviewNote?: string, serverId?: string): ServerRequest | null {
+  review(
+    requestId: string,
+    reviewerId: string,
+    approved: boolean,
+    reviewNote?: string,
+    serverId?: string
+  ): ServerRequest | null {
     const requests = readRequests();
-    const request = requests.find(r => r.id === requestId);
+    const request = requests.find((r) => r.id === requestId);
     if (!request) return null;
 
     request.status = approved ? 'APPROVED' : 'REJECTED';
@@ -108,7 +125,7 @@ export const serverRequestService = {
    */
   delete(requestId: string): boolean {
     const requests = readRequests();
-    const index = requests.findIndex(r => r.id === requestId);
+    const index = requests.findIndex((r) => r.id === requestId);
     if (index === -1) return false;
 
     requests.splice(index, 1);

@@ -1,6 +1,9 @@
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+// 统一 API 基址：确保恰好包含一次 /api
+const RAW_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const BASE_NO_API = RAW_BASE.replace(/\/?api\/?$/i, '');
+const API_URL = `${BASE_NO_API.replace(/\/$/, '')}/api`;
 
 export const api = axios.create({
   baseURL: API_URL,
@@ -83,7 +86,7 @@ export const serverAPI = {
   getServers: () => api.get('/servers'),
   searchServers: (q: string) => api.get('/servers/search', { params: { q } }),
   getServer: (serverId: string) => api.get(`/servers/${serverId}`),
-  updateServer: (serverId: string, data: { name?: string; description?: string }) =>
+  updateServer: (serverId: string, data: { name?: string; description?: string; isPublic?: boolean }) =>
     api.put(`/servers/${serverId}`, data),
   deleteServer: (serverId: string) => api.delete(`/servers/${serverId}`),
   createChannel: (serverId: string, data: { name: string; description?: string; type?: string }) =>

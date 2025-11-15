@@ -1,7 +1,9 @@
 import { Request, Response } from 'express';
+
 import { serverRequestService } from '../services/serverRequest.service';
-import { successResponse, errorResponse } from '../utils/response';
+import logger from '../utils/logger';
 import prisma from '../utils/prisma';
+import { successResponse, errorResponse } from '../utils/response';
 
 export const serverRequestController = {
   /**
@@ -26,19 +28,13 @@ export const serverRequestController = {
         return res.status(404).json(errorResponse('用户不存在'));
       }
 
-      const request = serverRequestService.create(
-        userId,
-        user.username,
-        name,
-        description,
-        reason
-      );
+      const request = serverRequestService.create(userId, user.username, name, description, reason);
 
       // 通知所有管理员
       try {
         const { getIO } = await import('../socket');
         const io = getIO();
-        
+
         // 获取所有管理员
         const admins = await prisma.user.findMany({
           where: { role: 'ADMIN' },
@@ -61,13 +57,14 @@ export const serverRequestController = {
           });
         });
       } catch (notifyError) {
-        console.error('Failed to send notification to admins:', notifyError);
+        logger.warn('Failed to send notification to admins:', { notifyError });
         // 不影响主流程，继续返回成功
       }
 
       res.json(successResponse(request, '申请已提交,等待管理员审批'));
-    } catch (error: any) {
-      res.status(500).json(errorResponse(error.message));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      res.status(500).json(errorResponse(message));
     }
   },
 
@@ -79,15 +76,15 @@ export const serverRequestController = {
       const userId = req.user!.id;
       const userRole = req.user!.role;
       const allRequests = serverRequestService.getByUser(userId);
-      
+
       // 普通用户只显示已批准的申请,管理员可以看到所有
-      const requests = userRole === 'ADMIN' 
-        ? allRequests 
-        : allRequests.filter(r => r.status === 'APPROVED');
-      
+      const requests =
+        userRole === 'ADMIN' ? allRequests : allRequests.filter((r) => r.status === 'APPROVED');
+
       res.json(successResponse(requests));
-    } catch (error: any) {
-      res.status(500).json(errorResponse(error.message));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      res.status(500).json(errorResponse(message));
     }
   },
 
@@ -95,12 +92,13 @@ export const serverRequestController = {
    * 管理员获取所有申请
    */
   async getAllRequests(req: Request, res: Response) {
-      // Admin only
+    // Admin only
     try {
       const requests = serverRequestService.getAll();
       res.json(successResponse(requests));
-    } catch (error: any) {
-      res.status(500).json(errorResponse(error.message));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      res.status(500).json(errorResponse(message));
     }
   },
 
@@ -108,12 +106,13 @@ export const serverRequestController = {
    * 管理员获取待审批申请
    */
   async getPendingRequests(req: Request, res: Response) {
-      // Admin only
+    // Admin only
     try {
       const requests = serverRequestService.getPending();
       res.json(successResponse(requests));
-    } catch (error: any) {
-      res.status(500).json(errorResponse(error.message));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      res.status(500).json(errorResponse(message));
     }
   },
 
@@ -134,7 +133,7 @@ export const serverRequestController = {
 
       // 如果批准,创建服务器
       if (approved) {
-        const request = serverRequestService.getAll().find(r => r.id === requestId);
+        const request = serverRequestService.getAll().find((r) => r.id === requestId);
         if (!request) {
           return res.status(404).json(errorResponse('申请不存在'));
         }
@@ -189,14 +188,14 @@ export const serverRequestController = {
       try {
         const { getIO } = await import('../socket');
         const io = getIO();
-        
+
         io.to(`user-${updatedRequest.requesterId}`).emit('notification', {
           id: `server-request-result-${requestId}`,
           type: approved ? 'server_invite' : 'system',
           title: approved ? '服务器申请已通过' : '服务器申请被拒绝',
-          message: approved 
-            ? `恭喜！你的服务器 "${updatedRequest.name}" 申请已通过${reviewNote ? '，备注：' + reviewNote : ''}`
-            : `很抱歉，你的服务器 "${updatedRequest.name}" 申请被拒绝${reviewNote ? '，原因：' + reviewNote : ''}`,
+          message: approved
+            ? `恭喜!你的服务器 "${updatedRequest.name}" 申请已通过${reviewNote ? ',备注:' + reviewNote : ''}`
+            : `很抱歉,你的服务器 "${updatedRequest.name}" 申请被拒绝${reviewNote ? ',原因:' + reviewNote : ''}`,
           data: {
             requestId,
             serverName: updatedRequest.name,
@@ -205,14 +204,24 @@ export const serverRequestController = {
             reviewNote,
           },
         });
+
+        // 如果批准,广播到服务器房间通知成员列表更新
+        if (approved && serverId) {
+          io.to(`server-${serverId}`).emit('serverMemberUpdate', {
+            serverId,
+            type: 'join',
+            userId: updatedRequest.requesterId,
+          });
+        }
       } catch (notifyError) {
-        console.error('Failed to send notification to requester:', notifyError);
+        logger.warn('Failed to send notification to requester:', { notifyError });
         // 不影响主流程
       }
 
       res.json(successResponse(updatedRequest, approved ? '已批准申请' : '已拒绝申请'));
-    } catch (error: any) {
-      res.status(500).json(errorResponse(error.message));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      res.status(500).json(errorResponse(message));
     }
   },
 
@@ -231,7 +240,7 @@ export const serverRequestController = {
       });
 
       const requests = serverRequestService.getAll();
-      const request = requests.find(r => r.id === requestId);
+      const request = requests.find((r) => r.id === requestId);
 
       if (!request) {
         return res.status(404).json(errorResponse('申请不存在'));
@@ -248,8 +257,9 @@ export const serverRequestController = {
       } else {
         res.status(404).json(errorResponse('申请不存在'));
       }
-    } catch (error: any) {
-      res.status(500).json(errorResponse(error.message));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      res.status(500).json(errorResponse(message));
     }
   },
 };

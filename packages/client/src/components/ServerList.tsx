@@ -4,18 +4,41 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useEffect, useRef, useState } from 'react';
 import { useUnreadStore } from '../stores/unreadStore';
 import AddServerModal from './AddServerModal';
+import { socketService } from '../lib/socket';
 
 export default function ServerList() {
-   const { servers, currentServerId, selectServer, isServersLoaded } = useServerStore();
+  const { servers, currentServerId, selectServer, isServersLoaded, loadServers } = useServerStore();
   const { user } = useAuthStore();
   const { channelUnread } = useUnreadStore();
   const navigate = useNavigate();
   const location = useLocation();
   const adminActive = location.pathname.startsWith('/app/admin');
   const homeActive = location.pathname === '/app';
-   const [showAddModal, setShowAddModal] = useState(false);
-  const hasAutoSelected = useRef(false); // 标记是否已经自动选择过服务器（仅首轮）
+  const [showAddModal, setShowAddModal] = useState(false);
+  const hasAutoSelected = useRef(false); // 标记是否已经自动选择过服务器(仅首轮)
   const initialPathRef = useRef<string>(window.location.pathname); // 记录挂载时的URL
+
+  // Socket实时更新监听
+  useEffect(() => {
+    const socket = socketService.getSocket();
+    if (!socket) return;
+
+    const handleServerUpdate = () => {
+      loadServers();
+    };
+
+    socket.on('serverCreate', handleServerUpdate);
+    socket.on('serverUpdate', handleServerUpdate);
+    socket.on('serverDelete', handleServerUpdate);
+    socket.on('serverMemberUpdate', handleServerUpdate);
+
+    return () => {
+      socket.off('serverCreate', handleServerUpdate);
+      socket.off('serverUpdate', handleServerUpdate);
+      socket.off('serverDelete', handleServerUpdate);
+      socket.off('serverMemberUpdate', handleServerUpdate);
+    };
+  }, [loadServers]);
 
   const handleHomeClick = () => {
     // 先清空状态，然后导航

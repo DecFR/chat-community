@@ -158,11 +158,11 @@ export const friendService = {
     }
 
     // 直接删除好友申请记录
-    await prisma.friendship.delete({
+    const deletedFriendship = await prisma.friendship.delete({
       where: { id: friendshipId },
     });
 
-    return { success: true };
+    return deletedFriendship;
   },
 
   /**
@@ -171,10 +171,8 @@ export const friendService = {
   async getFriends(userId: string) {
     const friendships = await prisma.friendship.findMany({
       where: {
-        OR: [
-          { senderId: userId, status: 'ACCEPTED' },
-          { receiverId: userId, status: 'ACCEPTED' },
-        ],
+        status: 'ACCEPTED',
+        OR: [{ senderId: userId }, { receiverId: userId }],
       },
       include: {
         sender: {
@@ -183,7 +181,6 @@ export const friendService = {
             username: true,
             avatarUrl: true,
             status: true,
-            bio: true,
           },
         },
         receiver: {
@@ -192,18 +189,21 @@ export const friendService = {
             username: true,
             avatarUrl: true,
             status: true,
-            bio: true,
           },
         },
       },
     });
 
     // 映射为好友对象
-    const friends = friendships.map((f: any) => {
+    const friends = friendships.map((f) => {
       const friend = f.senderId === userId ? f.receiver : f.sender;
       return {
         friendshipId: f.id,
-        ...friend,
+        id: friend.id,
+        username: friend.username,
+        // 保持与前端约定的字段名一致
+        avatarUrl: friend.avatarUrl,
+        status: friend.status,
       };
     });
 
@@ -254,10 +254,12 @@ export const friendService = {
       throw new Error('Not authorized');
     }
 
+    const friendId = friendship.senderId === userId ? friendship.receiverId : friendship.senderId;
+
     await prisma.friendship.delete({
       where: { id: friendshipId },
     });
 
-    return { success: true };
+    return { success: true, friendship, friendId };
   },
 };

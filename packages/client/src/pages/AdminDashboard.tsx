@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { adminAPI, serverRequestAPI } from '../lib/api';
+import { useState, useEffect, useCallback } from 'react';
+import { adminAPI, serverRequestAPI, inviteAPI } from '../lib/api';
 import { useAuthStore } from '../stores/authStore';
 import { useServerStore } from '../stores/serverStore';
 import { socketService } from '../lib/socket';
@@ -7,20 +7,27 @@ import { socketService } from '../lib/socket';
 // 错误边界组件（类组件）
 import React from 'react';
 
-class ErrorBoundary extends React.Component<
-  { children: React.ReactNode; fallback?: React.ReactNode },
-  { hasError: boolean; error?: Error }
-> {
-  constructor(props: any) {
+type ErrorBoundaryProps = {
+  children: React.ReactNode;
+  fallback?: React.ReactNode;
+};
+
+type ErrorBoundaryState = {
+  hasError: boolean;
+  error?: Error;
+};
+
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false };
   }
 
-  static getDerivedStateFromError(error: Error) {
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { hasError: true, error };
   }
 
-  componentDidCatch(error: Error, errorInfo: any) {
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
     console.error('服务器申请管理组件错误:', error, errorInfo);
   }
 
@@ -86,6 +93,11 @@ interface ServerRequest {
   createdAt: string;
 }
 
+interface Channel {
+  id: string;
+  name: string;
+}
+
 export default function AdminDashboard() {
   const { user } = useAuthStore();
   const { servers, deleteServer, loadServers: loadServersFromStore } = useServerStore();
@@ -100,55 +112,67 @@ export default function AdminDashboard() {
   const [successMessage, setSuccessMessage] = useState('');
 
   // 加载统计数据
-  const loadStats = async () => {
+  const loadStats = useCallback(async () => {
     try {
       setLoading(true);
       const response = await adminAPI.getStats();
       setStats(response.data.data);
-    } catch (err: any) {
-      setError(err.response?.data?.error || '加载统计数据失败');
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error && 'response' in err
+        ? ((err as { response?: { data?: { error?: string } } }).response?.data?.error || '加载统计数据失败')
+        : '加载统计数据失败';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   // 加载用户列表
-  const loadUsers = async () => {
+  const loadUsers = useCallback(async () => {
     try {
       setLoading(true);
       const response = await adminAPI.getUsers();
       setUsers(response.data.data);
-    } catch (err: any) {
-      setError(err.response?.data?.error || '加载用户列表失败');
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error && 'response' in err
+        ? ((err as { response?: { data?: { error?: string } } }).response?.data?.error || '加载用户列表失败')
+        : '加载用户列表失败';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   // 加载邀请码列表
-  const loadInviteCodes = async () => {
+  const loadInviteCodes = useCallback(async () => {
     try {
       setLoading(true);
       const response = await adminAPI.getInviteCodes();
       setInviteCodes(response.data.data);
-    } catch (err: any) {
-      setError(err.response?.data?.error || '加载邀请码失败');
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error && 'response' in err
+        ? ((err as { response?: { data?: { error?: string } } }).response?.data?.error || '加载邀请码失败')
+        : '加载邀请码失败';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   // 加载服务器列表 - 从 store 加载
-  const loadServers = async () => {
+  const loadServers = useCallback(async () => {
     try {
       setLoading(true);
       await loadServersFromStore();
-    } catch (err: any) {
-      setError(err.response?.data?.error || '加载服务器失败');
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error && 'response' in err
+        ? ((err as { response?: { data?: { error?: string } } }).response?.data?.error || '加载服务器失败')
+        : '加载服务器失败';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
-  };
+  }, [loadServersFromStore]);
 
   // 删除服务器
   const handleDeleteServer = async (serverId: string, serverName: string) => {
@@ -158,8 +182,11 @@ export default function AdminDashboard() {
       await deleteServer(serverId);
       setSuccessMessage('服务器删除成功');
       // 列表会自动更新，无需手动调用 loadServers
-    } catch (err: any) {
-      setError(err.response?.data?.error || '删除服务器失败');
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error && 'response' in err
+        ? ((err as { response?: { data?: { error?: string } } }).response?.data?.error || '删除服务器失败')
+        : '删除服务器失败';
+      setError(errorMessage);
     }
   };
 
@@ -171,8 +198,11 @@ export default function AdminDashboard() {
       await adminAPI.generateInviteCode(userId, 7); // 默认7天有效期
       setSuccessMessage('邀请码生成成功');
       loadInviteCodes();
-    } catch (err: any) {
-      setError(err.response?.data?.error || '生成邀请码失败');
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error && 'response' in err
+        ? ((err as { response?: { data?: { error?: string } } }).response?.data?.error || '生成邀请码失败')
+        : '生成邀请码失败';
+      setError(errorMessage);
     }
   };
 
@@ -186,8 +216,11 @@ export default function AdminDashboard() {
       await adminAPI.updateUserRole(userId, 'ADMIN');
       setSuccessMessage(`用户 "${username}" 已提升为管理员`);
       loadUsers();
-    } catch (err: any) {
-      setError(err.response?.data?.error || '提升管理员失败');
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error && 'response' in err
+        ? ((err as { response?: { data?: { error?: string } } }).response?.data?.error || '提升管理员失败')
+        : '提升管理员失败';
+      setError(errorMessage);
     }
   };
 
@@ -201,8 +234,11 @@ export default function AdminDashboard() {
       await adminAPI.updateUserRole(userId, 'USER');
       setSuccessMessage(`管理员 "${username}" 已降级为普通用户`);
       loadUsers();
-    } catch (err: any) {
-      setError(err.response?.data?.error || '降级用户失败');
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error && 'response' in err
+        ? ((err as { response?: { data?: { error?: string } } }).response?.data?.error || '降级用户失败')
+        : '降级用户失败';
+      setError(errorMessage);
     }
   };
 
@@ -216,8 +252,11 @@ export default function AdminDashboard() {
       await adminAPI.deleteUser(userId);
       setSuccessMessage('用户删除成功');
       loadUsers();
-    } catch (err: any) {
-      setError(err.response?.data?.error || '删除用户失败');
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error && 'response' in err
+        ? ((err as { response?: { data?: { error?: string } } }).response?.data?.error || '删除用户失败')
+        : '删除用户失败';
+      setError(errorMessage);
     }
   };
 
@@ -228,17 +267,15 @@ export default function AdminDashboard() {
     try {
       setError('');
       setSuccessMessage('');
-      // 使用用户邀请码删除接口
-      await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/invites/user/${codeId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-      });
+      // 使用统一 API 客户端删除用户邀请码
+      await inviteAPI.deleteUserInvite(codeId);
       setSuccessMessage('邀请码删除成功');
       loadInviteCodes();
-    } catch (err: any) {
-      setError(err.response?.data?.error || '删除邀请码失败');
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error && 'response' in err
+        ? ((err as { response?: { data?: { error?: string } } }).response?.data?.error || '删除邀请码失败')
+        : '删除邀请码失败';
+      setError(errorMessage);
     }
   };
 
@@ -254,8 +291,11 @@ export default function AdminDashboard() {
       setLoading(true);
       const response = await adminAPI.cleanMessages();
       setSuccessMessage(`成功清理了 ${response.data.deletedCount} 条消息`);
-    } catch (err: any) {
-      setError(err.response?.data?.error || '清理消息失败');
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error && 'response' in err
+        ? ((err as { response?: { data?: { error?: string } } }).response?.data?.error || '清理消息失败')
+        : '清理消息失败';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -270,8 +310,11 @@ export default function AdminDashboard() {
       setSuccessMessage('');
       const response = await adminAPI.cleanMessages(channelId);
       setSuccessMessage(`成功清理了 ${response.data.deletedCount} 条消息`);
-    } catch (err: any) {
-      setError(err.response?.data?.error || '清理消息失败');
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error && 'response' in err
+        ? ((err as { response?: { data?: { error?: string } } }).response?.data?.error || '清理消息失败')
+        : '清理消息失败';
+      setError(errorMessage);
     }
   };
 
@@ -286,8 +329,11 @@ export default function AdminDashboard() {
       const maxAgeMs = !isNaN(h) && h > 0 ? Math.round(h * 60 * 60 * 1000) : undefined;
       const resp = await adminAPI.cleanupAvatars(maxAgeMs);
       setSuccessMessage(`头像清理完成：删除 ${resp.data.data?.removed ?? 0} 个文件`);
-    } catch (err: any) {
-      setError(err.response?.data?.error || '头像清理失败');
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error && 'response' in err
+        ? ((err as { response?: { data?: { error?: string } } }).response?.data?.error || '头像清理失败')
+        : '头像清理失败';
+      setError(errorMessage);
     } finally {
       setCleanupRunning(false);
     }
@@ -303,7 +349,7 @@ export default function AdminDashboard() {
     } else if (activeTab === 'servers') {
       loadServers();
     }
-  }, [activeTab]);
+  }, [activeTab, loadStats, loadUsers, loadInviteCodes, loadServers]);
 
   // 如果不是管理员，返回空内容
   if (user?.role !== 'ADMIN') {
@@ -715,7 +761,7 @@ export default function AdminDashboard() {
                           <div className="font-medium text-white mb-3">{server.name}</div>
                           {server.channels && server.channels.length > 0 ? (
                             <div className="space-y-2">
-                              {server.channels.map((channel: any) => (
+                              {server.channels.map((channel: Channel) => (
                                 <div key={channel.id} className="flex items-center justify-between bg-discord-hover rounded p-3">
                                   <div className="flex items-center gap-2">
                                     <span className="text-gray-400">#</span>
@@ -802,7 +848,6 @@ export default function AdminDashboard() {
 
 // 子组件：服务器申请管理
 function ServerRequestsManagement() {
-  const { user } = useAuthStore();
   const [requests, setRequests] = useState<ServerRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -816,9 +861,9 @@ function ServerRequestsManagement() {
       const response = await serverRequestAPI.getPendingRequests();
       
       // 防御性数据校验：确保返回数组并过滤无效项
-      const rawData = response.data.data || response.data || [];
+      const rawData: unknown = response.data.data || response.data || [];
       const validRequests = Array.isArray(rawData) 
-        ? rawData.filter(req => 
+        ? rawData.filter((req): req is ServerRequest => 
             req && 
             typeof req.id === 'string' && 
             typeof req.name === 'string' &&
@@ -828,11 +873,14 @@ function ServerRequestsManagement() {
       
       setRequests(validRequests);
       
-      if (rawData.length > validRequests.length) {
+      if (Array.isArray(rawData) && rawData.length > validRequests.length) {
         console.warn(`过滤了 ${rawData.length - validRequests.length} 个无效的服务器申请数据`);
       }
-    } catch (err: any) {
-      setError(err.response?.data?.error || '加载服务器申请失败');
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error && 'response' in err
+        ? ((err as { response?: { data?: { error?: string } } }).response?.data?.error || '加载服务器申请失败')
+        : '加载服务器申请失败';
+      setError(errorMessage);
       console.error('加载服务器申请失败:', err);
     } finally {
       setLoading(false);
@@ -843,7 +891,7 @@ function ServerRequestsManagement() {
     loadRequests();
 
     // 监听新的服务器申请通知
-    const handleNotification = (notification: any) => {
+    const handleNotification = (notification: { type?: string; content?: string }) => {
       try {
         const notificationType = notification?.type;
         const notificationContent = notification?.content || '';
@@ -892,8 +940,10 @@ function ServerRequestsManagement() {
       
       // 重新加载列表
       await loadRequests();
-    } catch (err: any) {
-      const errorMsg = err.response?.data?.error || err.message || `${action}申请失败`;
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error && 'response' in err 
+        ? ((err as { response?: { data?: { error?: string } } }).response?.data?.error || (err as Error).message || `${action}申请失败`)
+        : `${action}申请失败`;
       setError(errorMsg);
       console.error('审核服务器申请失败:', err);
     } finally {
@@ -1057,8 +1107,11 @@ function PersistentCleanupConfig() {
         if (!mounted) return;
         setMaxAgeHours(String(Math.round((cfg.maxAgeMs || 24 * 60 * 60 * 1000) / 3600000)));
         setIntervalHours(String(Math.round((cfg.intervalMs || 6 * 60 * 60 * 1000) / 3600000)));
-      } catch (e: any) {
-        setError(e?.response?.data?.error || '加载配置失败');
+      } catch (e: unknown) {
+        const errorMessage = e instanceof Error && 'response' in e
+        ? ((e as { response?: { data?: { error?: string } } }).response?.data?.error || '加载配置失败')
+        : '加载配置失败';
+        setError(errorMessage);
       } finally {
         setLoading(false);
       }
@@ -1075,7 +1128,7 @@ function PersistentCleanupConfig() {
     try {
       const maxAgeMs = Number(maxAgeHours) * 3600000;
       const intervalMs = Number(intervalHours) * 3600000;
-      const payload: any = {};
+      const payload: Record<string, number> = {};
       if (!Number.isNaN(maxAgeMs) && maxAgeMs > 0) payload.maxAgeMs = maxAgeMs;
       if (!Number.isNaN(intervalMs) && intervalMs >= 60000) payload.intervalMs = intervalMs;
       const { data } = await adminAPI.updateAvatarCleanupConfig(payload);
@@ -1083,8 +1136,11 @@ function PersistentCleanupConfig() {
       setMaxAgeHours(String(Math.round(saved.maxAgeMs / 3600000)));
       setIntervalHours(String(Math.round(saved.intervalMs / 3600000)));
       setSavedHint('已保存并已重载服务端清理计划');
-    } catch (e: any) {
-      setError(e?.response?.data?.error || '保存失败');
+    } catch (e: unknown) {
+      const errorMessage = e instanceof Error && 'response' in e
+        ? ((e as { response?: { data?: { error?: string } } }).response?.data?.error || '保存失败')
+        : '保存失败';
+      setError(errorMessage);
     } finally {
       setSaving(false);
     }
@@ -1190,7 +1246,13 @@ function PersistentCleanupConfig() {
 // 子组件：系统信息面板
 function SystemInfoPanel() {
   const [loading, setLoading] = useState(true);
-  const [info, setInfo] = useState<any>(null);
+  const [info, setInfo] = useState<{
+    cpu?: { model: string; cores: number };
+    memory?: { total: number; used: number; usagePercent: number };
+    platform: string;
+    arch: string;
+    uptime: number;
+  } | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -1200,8 +1262,11 @@ function SystemInfoPanel() {
         const { data } = await adminAPI.getSystemInfo();
         if (!mounted) return;
         setInfo(data?.data || data);
-      } catch (e: any) {
-        setError(e?.response?.data?.error || '加载失败');
+      } catch (e: unknown) {
+        const errorMessage = e instanceof Error && 'response' in e
+        ? ((e as { response?: { data?: { error?: string } } }).response?.data?.error || '加载失败')
+        : '加载失败';
+        setError(errorMessage);
       } finally {
         setLoading(false);
       }
@@ -1293,15 +1358,18 @@ function ThreadPoolConfig() {
         const cores = sysInfo?.cpu?.cores || 1;
         setCpuCores(cores);
         // 默认值为线程数一半，最少1
-        let defaultThreads = Math.max(1, Math.ceil(cores / 2));
+        const defaultThreads = Math.max(1, Math.ceil(cores / 2));
         const cfg = configRes.data?.data || configRes.data;
         // 如果数据库配置大于线程数一半，强制限制
         let showThreads = cfg.maxThreads;
         if (showThreads > cores * 2) showThreads = cores * 2;
         if (!showThreads || showThreads === cores) showThreads = defaultThreads;
         setMaxThreads(String(showThreads));
-      } catch (e: any) {
-        setError(e?.response?.data?.error || '加载失败');
+      } catch (e: unknown) {
+        const errorMessage = e instanceof Error && 'response' in e
+        ? ((e as { response?: { data?: { error?: string } } }).response?.data?.error || '加载失败')
+        : '加载失败';
+        setError(errorMessage);
       } finally {
         setLoading(false);
       }
@@ -1323,8 +1391,11 @@ function ThreadPoolConfig() {
       const saved = data?.data || data;
       setMaxThreads(String(saved.maxThreads));
       setSavedHint('已保存线程池配置');
-    } catch (e: any) {
-      setError(e?.response?.data?.error || '保存失败');
+    } catch (e: unknown) {
+      const errorMessage = e instanceof Error && 'response' in e
+        ? ((e as { response?: { data?: { error?: string } } }).response?.data?.error || '保存失败')
+        : '保存失败';
+      setError(errorMessage);
     } finally {
       setSaving(false);
     }

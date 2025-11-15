@@ -22,20 +22,17 @@ interface SearchResult {
 export default function UserSearchModal({
   isOpen,
   onClose,
-  onSelectUser,
   inline = false, // 默认为模态框模式
 }: UserSearchModalProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   // 当组件打开时重置状态
   useEffect(() => {
     if (isOpen) {
       setQuery('');
       setResults([]);
-      setError(null);
       setIsLoading(false);
     }
   }, [isOpen]);
@@ -44,19 +41,16 @@ export default function UserSearchModal({
 
   const handleSearch = async () => {
     if (!query.trim()) {
-      setError('请输入搜索关键词');
       toast.warning('请输入搜索关键词');
       return;
     }
 
     setIsLoading(true);
-    setError(null);
 
     try {
       const response = await userAPI.searchUsers(query);
       setResults(response.data.data || []);
       if (response.data.data?.length === 0) {
-        setError('未找到匹配的用户');
         toast.info('未找到匹配的用户');
       }
     } catch (err: unknown) {
@@ -65,7 +59,6 @@ export default function UserSearchModal({
           ? ((err as { response?: { data?: { message?: string } } }).response
               ?.data?.message || '搜索失败')
           : '搜索失败';
-      setError(errorMessage);
       toast.error(errorMessage);
     } finally {
       setIsLoading(false);
@@ -75,15 +68,6 @@ export default function UserSearchModal({
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
       handleSearch();
-    }
-  };
-
-  const handleSelectUser = (userId: string) => {
-    if (onSelectUser) {
-      onSelectUser(userId);
-    }
-    if (!inline) {
-      onClose();
     }
   };
 

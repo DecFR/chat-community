@@ -1,31 +1,70 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useFriendStore } from '../stores/friendStore';
 import { friendAPI } from '../lib/api';
 import FriendRequestsPanel from './FriendRequestsPanel';
 import UserSearchModal from './UserSearchModal';
 import { UserAvatar } from './UserAvatar';
+import { socketService } from '../lib/socket';
+import { toast } from '../stores/toastStore';
 
 type FriendTab = 'online' | 'all' | 'pending' | 'add';
 
+interface Friend {
+  id: string;
+  username: string;
+  avatarUrl?: string;
+  status: string;
+  bio?: string;
+  friendshipId: string;
+}
+
 export default function FriendsPanel() {
-  const { friends } = useFriendStore();
+  const { friends, loadFriends, updateFriendProfile } = useFriendStore();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<FriendTab>('online');
   const [showUserSearch, setShowUserSearch] = useState(false);
+
+  useEffect(() => {
+    const socket = socketService.getSocket();
+    if (!socket) return;
+
+    const handleFriendUpdate = () => {
+      loadFriends();
+    };
+
+    const handleProfileUpdate = (data: { userId: string; username?: string; avatarUrl?: string }) => {
+      updateFriendProfile(data.userId, {
+        ...(data.username && { username: data.username }),
+        ...(data.avatarUrl !== undefined && { avatarUrl: data.avatarUrl }),
+      });
+    };
+
+    socket.on('friendRequestAccepted', handleFriendUpdate);
+    socket.on('friendRemoved', handleFriendUpdate);
+    socket.on('friendProfileUpdate', handleProfileUpdate);
+    socket.on('userProfileUpdate', handleProfileUpdate);
+
+    return () => {
+      socket.off('friendRequestAccepted', handleFriendUpdate);
+      socket.off('friendRemoved', handleFriendUpdate);
+      socket.off('friendProfileUpdate', handleProfileUpdate);
+      socket.off('userProfileUpdate', handleProfileUpdate);
+    };
+  }, [loadFriends, updateFriendProfile]);
 
   const onlineFriends = friends.filter((f) => f.status === 'ONLINE');
 
   const handleSendFriendRequest = async (userId: string) => {
     try {
       await friendAPI.sendRequest(userId);
-      alert('好友请求已发送');
+      toast.success('好友请求已发送');
       setShowUserSearch(false);
     } catch (error: unknown) {
       const errorMessage = error instanceof Error && 'response' in error
         ? ((error as { response?: { data?: { error?: string } } }).response?.data?.error || '发送请求失败')
         : '发送请求失败';
-      alert(errorMessage);
+      toast.error(errorMessage);
     }
   };
 
@@ -43,7 +82,7 @@ export default function FriendsPanel() {
               </div>
             ) : (
               <div className="space-y-2">
-                {onlineFriends.map((friend) => (
+                {onlineFriends.map((friend: Friend) => (
                   <div
                     key={friend.id}
                     className="card flex items-center justify-between hover:bg-discord-hover cursor-pointer transition-colors"
@@ -88,7 +127,7 @@ export default function FriendsPanel() {
               </div>
             ) : (
               <div className="space-y-2">
-                {friends.map((friend) => (
+                {friends.map((friend: Friend) => (
                   <div
                     key={friend.id}
                     className="card flex items-center justify-between hover:bg-discord-hover cursor-pointer transition-colors"

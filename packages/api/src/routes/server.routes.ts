@@ -1,5 +1,8 @@
+import { Prisma } from '@prisma/client';
 import { Router } from 'express';
+
 import { authMiddleware } from '../middleware/auth';
+import { getIO } from '../socket';
 
 const router = Router();
 
@@ -8,17 +11,17 @@ router.use(authMiddleware);
 
 /**
  * @route   GET /api/servers/search
- * @desc    搜索公开服务器（按名称或描述，模糊匹配）
+ * @desc    搜索服务器（按名称或描述，模糊匹配）。
+ *         设计要求：用户申请创建的服务器默认为私有，但可被搜索到并发起加入申请。
+ *         因此，这里不再仅限 isPublic=true。
  * @access  Private
  */
 router.get('/search', async (req, res) => {
   try {
     const q = (req.query.q as string | undefined)?.trim();
-    const prisma = (await import('../utils/prisma')).default;
+    const prisma = (await import('../utils/prisma.js')).default;
 
-    const where: any = {
-      isPublic: true, // 只搜索公开服务器
-    };
+    const where: Prisma.ServerWhereInput = {};
 
     if (q) {
       where.OR = [
@@ -32,13 +35,18 @@ router.get('/search', async (req, res) => {
       include: {
         _count: { select: { members: true, channels: true } },
       },
-      orderBy: { createdAt: 'desc' },
+      // 优先显示公开服务器，其次按创建时间倒序
+      orderBy: [
+        { isPublic: 'desc' },
+        { createdAt: 'desc' },
+      ],
       take: 50,
     });
 
     res.json({ success: true, data: servers });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    return res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -86,9 +94,9 @@ router.post('/', async (req, res) => {
           role: 'OWNER',
         },
       });
-      
+
       // 4. 返回包含完整信息的服务器数据
-      return tx.server.findUnique({
+      const fullServerData = await tx.server.findUnique({
         where: { id: server.id },
         include: {
           channels: true,
@@ -101,12 +109,23 @@ router.post('/', async (req, res) => {
           },
         },
       });
+
+      if (fullServerData) {
+        // 5. 如果服务器是公开的，则广播给所有在线用户
+        const { getIO } = await import('../socket');
+        const io = getIO();
+        if (fullServerData.isPublic) {
+          io.emit('serverCreate', fullServerData);
+        }
+      }
+
+      return fullServerData;
     });
 
     res.status(201).json({ success: true, data: newServer });
-  } catch (error: any) {
-    console.error('创建服务器失败:', error);
-    res.status(500).json({ success: false, error: '创建服务器时发生内部错误' });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : '创建服务器时发生内部错误';
+    return res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -125,15 +144,12 @@ router.get('/', async (req, res) => {
       where: { userId },
       select: { serverId: true },
     });
-    const userServerIds = userMemberships.map(m => m.serverId);
+    const userServerIds = userMemberships.map((m) => m.serverId);
 
     // 查询: 公开服务器 OR 用户已加入的服务器
     const servers = await prisma.server.findMany({
       where: {
-        OR: [
-          { isPublic: true },
-          { id: { in: userServerIds } },
-        ],
+        OR: [{ isPublic: true }, { id: { in: userServerIds } }],
       },
       include: {
         channels: true,
@@ -147,12 +163,13 @@ router.get('/', async (req, res) => {
       },
       orderBy: {
         createdAt: 'asc',
-      }
+      },
     });
 
     res.json({ success: true, data: servers });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    return res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -190,8 +207,68 @@ router.get('/:id', async (req, res) => {
     }
 
     res.json({ success: true, data: server });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    return res.status(500).json({ success: false, error: message });
+  }
+});
+
+/**
+ * @route   GET /api/servers/:id/members
+ * @desc    获取服务器成员列表（用于右侧成员栏）
+ * @access  Private（公开服务器任何登录用户可见；私有服务器需成员权限）
+ */
+router.get('/:id/members', async (req, res) => {
+  try {
+    const serverId = req.params.id;
+    const userId = req.user!.id;
+    const prisma = (await import('../utils/prisma')).default;
+
+    // 服务器存在性与公开性
+    const server = await prisma.server.findUnique({
+      where: { id: serverId },
+      select: { id: true, isPublic: true },
+    });
+    if (!server) return res.status(404).json({ success: false, error: 'Server not found' });
+
+    // 私有服务器需要成员权限
+    if (!server.isPublic) {
+      const membership = await prisma.serverMember.findUnique({
+        where: { serverId_userId: { serverId, userId } },
+      });
+      if (!membership) {
+        return res.status(403).json({ success: false, error: 'No permission to view members' });
+      }
+    }
+
+    // 查询成员并包含用户信息
+    const members = await prisma.serverMember.findMany({
+      where: { serverId },
+      include: {
+        user: {
+          select: { id: true, username: true, avatarUrl: true, status: true },
+        },
+      },
+      orderBy: [
+        // 角色排序：OWNER, ADMIN, MEMBER（枚举按字母顺序已满足常见排序，必要时可在客户端再分组）
+        { role: 'asc' },
+        { joinedAt: 'asc' },
+      ],
+    });
+
+    // 映射为前端所需结构
+    const result = members.map((m: any) => ({
+      id: m.user.id,
+      username: m.user.username,
+      avatarUrl: m.user.avatarUrl ?? undefined,
+      role: m.role,
+      status: m.user.status,
+    }));
+
+    return res.json({ success: true, data: result });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    return res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -203,7 +280,7 @@ router.get('/:id', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const serverId = req.params.id;
-    const { name, description } = req.body;
+    const { name, description, isPublic } = req.body as { name?: string; description?: string; isPublic?: boolean };
     const userId = req.user!.id;
 
     const prisma = (await import('../utils/prisma')).default;
@@ -225,15 +302,29 @@ router.put('/:id', async (req, res) => {
       data: {
         ...(name && { name }),
         ...(description !== undefined && { description }),
+        ...(typeof isPublic === 'boolean' && { isPublic }),
       },
       include: {
         channels: true,
       },
     });
 
+    // Socket实时广播服务器更新
+    const io = getIO();
+    io.to(`server-${serverId}`).emit('serverUpdate', {
+      serverId,
+      server: {
+        id: server.id,
+        name: server.name,
+        description: server.description,
+        isPublic: server.isPublic,
+      },
+    });
+
     res.json({ success: true, data: server });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    return res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -259,16 +350,23 @@ router.delete('/:id', async (req, res) => {
     }
 
     if (server.ownerId !== userId) {
-      return res.status(403).json({ success: false, error: 'Only server owner can delete the server' });
+      return res
+        .status(403)
+        .json({ success: false, error: 'Only server owner can delete the server' });
     }
 
     await prisma.server.delete({
       where: { id: serverId },
     });
 
+    // Socket实时广播服务器删除
+    const io = getIO();
+    io.to(`server-${serverId}`).emit('serverDelete', { serverId });
+
     res.json({ success: true, message: 'Server deleted successfully' });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    return res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -293,9 +391,17 @@ router.post('/:id/channels', async (req, res) => {
       },
     });
 
+    // Socket实时广播频道创建
+    const io = getIO();
+    io.to(`server-${serverId}`).emit('channelCreate', {
+      serverId,
+      channel,
+    });
+
     res.status(201).json({ success: true, data: channel });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    return res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -332,9 +438,18 @@ router.put('/:serverId/channels/:channelId', async (req, res) => {
       },
     });
 
+    // Socket实时广播频道更新
+    const io = getIO();
+    io.to(`server-${serverId}`).emit('channelUpdate', {
+      serverId,
+      channelId,
+      channel,
+    });
+
     res.json({ success: true, data: channel });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    return res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -375,9 +490,17 @@ router.delete('/:serverId/channels/:channelId', async (req, res) => {
       where: { id: channelId },
     });
 
+    // Socket实时广播频道删除
+    const io = getIO();
+    io.to(`server-${serverId}`).emit('channelDelete', {
+      serverId,
+      channelId,
+    });
+
     res.json({ success: true, message: 'Channel deleted successfully' });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    return res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -407,7 +530,8 @@ router.post('/:id/join-requests', async (req, res) => {
     const pending = await prisma.serverJoinRequest.findFirst({
       where: { serverId, applicantId: userId, status: 'PENDING' },
     });
-    if (pending) return res.status(400).json({ success: false, error: '已提交过申请，请耐心等待审核' });
+    if (pending)
+      return res.status(400).json({ success: false, error: '已提交过申请，请耐心等待审核' });
 
     const created = await prisma.serverJoinRequest.create({
       data: {
@@ -432,8 +556,9 @@ router.post('/:id/join-requests', async (req, res) => {
     });
 
     res.json({ success: true, data: created });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    return res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -450,7 +575,8 @@ router.get('/:id/join-requests', async (req, res) => {
 
     const server = await prisma.server.findUnique({ where: { id: serverId } });
     if (!server) return res.status(404).json({ success: false, error: '服务器不存在' });
-    if (server.ownerId !== userId) return res.status(403).json({ success: false, error: '无权查看该服务器的申请' });
+    if (server.ownerId !== userId)
+      return res.status(403).json({ success: false, error: '无权查看该服务器的申请' });
 
     const list = await prisma.serverJoinRequest.findMany({
       where: { serverId },
@@ -458,8 +584,9 @@ router.get('/:id/join-requests', async (req, res) => {
       include: { applicant: { select: { id: true, username: true, avatarUrl: true } } },
     });
     res.json({ success: true, data: list });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    return res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -477,31 +604,47 @@ router.post('/:serverId/join-requests/:requestId/review', async (req, res) => {
 
     const server = await prisma.server.findUnique({ where: { id: serverId } });
     if (!server) return res.status(404).json({ success: false, error: '服务器不存在' });
-    if (server.ownerId !== userId) return res.status(403).json({ success: false, error: '无权审核该服务器的申请' });
+    if (server.ownerId !== userId)
+      return res.status(403).json({ success: false, error: '无权审核该服务器的申请' });
 
     const reqRec = await prisma.serverJoinRequest.findUnique({ where: { id: requestId } });
-    if (!reqRec || reqRec.serverId !== serverId) return res.status(404).json({ success: false, error: '申请不存在' });
-    if (reqRec.status !== 'PENDING') return res.status(400).json({ success: false, error: '该申请已处理' });
+    if (!reqRec || reqRec.serverId !== serverId)
+      return res.status(404).json({ success: false, error: '申请不存在' });
+    if (reqRec.status !== 'PENDING')
+      return res.status(400).json({ success: false, error: '该申请已处理' });
 
     if (approved) {
       // 同意：创建成员，更新申请
       await prisma.$transaction([
-        prisma.serverMember.create({ data: { serverId, userId: reqRec.applicantId, role: 'MEMBER' } }),
+        prisma.serverMember.create({
+          data: { serverId, userId: reqRec.applicantId, role: 'MEMBER' },
+        }),
         prisma.serverJoinRequest.update({
           where: { id: requestId },
-          data: { status: 'APPROVED', reviewNote: reviewNote || null, reviewedAt: new Date(), reviewerId: userId },
+          data: {
+            status: 'APPROVED',
+            reviewNote: reviewNote || null,
+            reviewedAt: new Date(),
+            reviewerId: userId,
+          },
         }),
       ]);
     } else {
       await prisma.serverJoinRequest.update({
         where: { id: requestId },
-        data: { status: 'REJECTED', reviewNote: reviewNote || null, reviewedAt: new Date(), reviewerId: userId },
+        data: {
+          status: 'REJECTED',
+          reviewNote: reviewNote || null,
+          reviewedAt: new Date(),
+          reviewerId: userId,
+        },
       });
     }
 
     res.json({ success: true });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    return res.status(500).json({ success: false, error: message });
   }
 });
 

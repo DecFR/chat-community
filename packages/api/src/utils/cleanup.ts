@@ -1,7 +1,12 @@
-import path from 'path';
 import fs from 'fs/promises';
-import prisma from './prisma';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
 import { getAvatarCleanupConfig } from './config';
+import prisma from './prisma';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const UPLOAD_DIR = path.join(__dirname, '../../uploads');
 
@@ -44,7 +49,7 @@ export async function cleanupUnusedAvatars(maxAgeOverride?: number) {
       }
     }
     return { removed };
-  } catch (e) {
+  } catch {
     return { removed: 0 };
   }
 }

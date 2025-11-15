@@ -1,8 +1,12 @@
 import { Server as HttpServer } from 'http';
-import { Server, Socket } from 'socket.io';
+
+import { UserStatus, Friendship } from '@prisma/client';
 import jwt from 'jsonwebtoken';
-import prisma from '../utils/prisma';
+import { Server, Socket } from 'socket.io';
+
 import { encrypt, decrypt } from '../utils/encryption';
+import logger from '../utils/logger';
+import prisma from '../utils/prisma';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 
@@ -62,14 +66,14 @@ export function initializeSocket(httpServer: HttpServer) {
       socket.username = decoded.username;
 
       next();
-    } catch (error) {
+    } catch {
       next(new Error('Authentication error'));
     }
   });
 
   // 连接事件
   io.on('connection', async (socket: AuthSocket) => {
-    console.log(`User connected: ${socket.username} (${socket.userId})`);
+    logger.info(`User connected: ${socket.username} (${socket.userId})`);
 
     // 加入用户个人房间
     socket.join(`user-${socket.userId}`);
@@ -90,7 +94,7 @@ export function initializeSocket(httpServer: HttpServer) {
       },
     });
 
-    servers.forEach((server: any) => {
+    servers.forEach((server: { id: string }) => {
       socket.join(`server-${server.id}`);
     });
 
@@ -113,7 +117,7 @@ export function initializeSocket(httpServer: HttpServer) {
     // 发送直接消息
     socket.on('sendDirectMessage', async (data: SendMessageData) => {
       try {
-          const { content, receiverId, attachments } = data;
+        const { content, receiverId, attachments } = data;
 
         if (!receiverId) {
           socket.emit('error', { message: 'Receiver ID is required' });
@@ -146,18 +150,21 @@ export function initializeSocket(httpServer: HttpServer) {
             encryptedContent,
             authorId: socket.userId!,
             directMessageConversationId: conversation.id,
-              attachments: attachments && attachments.length > 0 ? {
-                create: attachments.map(a => ({
-                  url: a.url,
-                  type: a.type as any,
-                  filename: a.filename || '',
-                  mimeType: a.mimeType || '',
-                  size: a.size || 0,
-                  width: a.width,
-                  height: a.height,
-                  durationMs: a.durationMs,
-                })),
-              } : undefined,
+            attachments:
+              attachments && attachments.length > 0
+                ? {
+                    create: attachments.map((a) => ({
+                      url: a.url,
+                      type: a.type,
+                      filename: a.filename || '',
+                      mimeType: a.mimeType || '',
+                      size: a.size || 0,
+                      width: a.width,
+                      height: a.height,
+                      durationMs: a.durationMs,
+                    })),
+                  }
+                : undefined,
           },
           include: {
             author: {
@@ -167,7 +174,7 @@ export function initializeSocket(httpServer: HttpServer) {
                 avatarUrl: true,
               },
             },
-              attachments: true,
+            attachments: true,
           },
         });
 
@@ -176,13 +183,15 @@ export function initializeSocket(httpServer: HttpServer) {
           ...message,
           content: decrypt(message.encryptedContent),
           encryptedContent: undefined,
+          directMessageConversationId: conversation.id,
+          authorId: socket.userId!,
         };
 
         // 发送给发送者和接收者
         io.to(`user-${socket.userId}`).emit('directMessage', decryptedMessage);
         io.to(`user-${receiverId}`).emit('directMessage', decryptedMessage);
       } catch (error) {
-        console.error('Error sending direct message:', error);
+        logger.error('Error sending direct message:', { error });
         socket.emit('error', { message: 'Failed to send message' });
       }
     });
@@ -191,14 +200,14 @@ export function initializeSocket(httpServer: HttpServer) {
     socket.on('joinServer', (data: { serverId?: string }) => {
       if (data?.serverId) {
         socket.join(`server-${data.serverId}`);
-        console.log(`User ${socket.username} joined server room: server-${data.serverId}`);
+        logger.debug(`User ${socket.username} joined server room: server-${data.serverId}`);
       }
     });
 
     socket.on('leaveServer', (data: { serverId?: string }) => {
       if (data?.serverId) {
         socket.leave(`server-${data.serverId}`);
-        console.log(`User ${socket.username} left server room: server-${data.serverId}`);
+        logger.debug(`User ${socket.username} left server room: server-${data.serverId}`);
       }
     });
 
@@ -231,7 +240,7 @@ export function initializeSocket(httpServer: HttpServer) {
     // 发送频道消息
     socket.on('sendChannelMessage', async (data: SendMessageData) => {
       try {
-          const { content, channelId, attachments } = data;
+        const { content, channelId, attachments } = data;
 
         if (!channelId) {
           socket.emit('error', { message: 'Channel ID is required' });
@@ -245,18 +254,21 @@ export function initializeSocket(httpServer: HttpServer) {
             encryptedContent,
             authorId: socket.userId!,
             channelId,
-              attachments: attachments && attachments.length > 0 ? {
-                create: attachments.map(a => ({
-                  url: a.url,
-                  type: a.type as any,
-                  filename: a.filename || '',
-                  mimeType: a.mimeType || '',
-                  size: a.size || 0,
-                  width: a.width,
-                  height: a.height,
-                  durationMs: a.durationMs,
-                })),
-              } : undefined,
+            attachments:
+              attachments && attachments.length > 0
+                ? {
+                    create: attachments.map((a) => ({
+                      url: a.url,
+                      type: a.type,
+                      filename: a.filename || '',
+                      mimeType: a.mimeType || '',
+                      size: a.size || 0,
+                      width: a.width,
+                      height: a.height,
+                      durationMs: a.durationMs,
+                    })),
+                  }
+                : undefined,
           },
           include: {
             author: {
@@ -280,12 +292,14 @@ export function initializeSocket(httpServer: HttpServer) {
           ...message,
           content: decrypt(message.encryptedContent),
           encryptedContent: undefined,
+          channelId: channelId,
+          authorId: socket.userId!,
         };
 
         // 广播到服务器房间
         io.to(`server-${message.channel?.serverId}`).emit('channelMessage', decryptedMessage);
       } catch (error) {
-        console.error('Error sending channel message:', error);
+        logger.error('Error sending channel message:', { error });
         socket.emit('error', { message: 'Failed to send message' });
       }
     });
@@ -314,7 +328,7 @@ export function initializeSocket(httpServer: HttpServer) {
 
         socket.emit('conversationMarkedAsRead', { conversationId, messageId });
       } catch (error) {
-        console.error('Error marking conversation as read:', error);
+        logger.error('Error marking conversation as read:', { error });
       }
     });
 
@@ -342,7 +356,7 @@ export function initializeSocket(httpServer: HttpServer) {
 
         socket.emit('channelMarkedAsRead', { channelId, messageId });
       } catch (error) {
-        console.error('Error marking channel as read:', error);
+        logger.error('Error marking channel as read:', { error });
       }
     });
 
@@ -368,18 +382,18 @@ export function initializeSocket(httpServer: HttpServer) {
       try {
         await prisma.user.update({
           where: { id: socket.userId },
-          data: { status: status as any },
+          data: { status: status as UserStatus },
         });
 
         await notifyFriendsStatus(socket.userId!, status);
       } catch (error) {
-        console.error('Error updating status:', error);
+        logger.error('Error updating status:', { error });
       }
     });
 
     // 断开连接
     socket.on('disconnect', async () => {
-      console.log(`User disconnected: ${socket.username} (${socket.userId})`);
+      logger.info(`User disconnected: ${socket.username} (${socket.userId})`);
 
       // 更新用户状态为离线
       await prisma.user.update({
@@ -422,7 +436,7 @@ async function notifyFriendsStatus(userId: string, status: string) {
     },
   });
 
-  const friendIds = friendships.map((f: any) =>
+  const friendIds = friendships.map((f: Friendship) =>
     f.senderId === userId ? f.receiverId : f.senderId
   );
 

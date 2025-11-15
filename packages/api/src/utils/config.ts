@@ -45,16 +45,21 @@ export async function getAvatarCleanupConfig(): Promise<AvatarCleanupConfig> {
   };
 }
 
-export async function updateAvatarCleanupConfig(input: Partial<AvatarCleanupConfig>): Promise<AvatarCleanupConfig> {
+export async function updateAvatarCleanupConfig(
+  input: Partial<AvatarCleanupConfig>
+): Promise<AvatarCleanupConfig> {
   const current = await getAvatarCleanupConfig();
   const next: AvatarCleanupConfig = {
     maxAgeMs: typeof input.maxAgeMs === 'number' ? Math.max(0, input.maxAgeMs) : current.maxAgeMs,
-    intervalMs: typeof input.intervalMs === 'number' ? Math.max(60_000, input.intervalMs) : current.intervalMs,
+    intervalMs:
+      typeof input.intervalMs === 'number'
+        ? Math.max(60_000, input.intervalMs)
+        : current.intervalMs,
   };
 
   await Promise.all([
     setConfigValue(KEYS.AVATAR_MAX_AGE_MS, String(next.maxAgeMs)),
-  await setConfigValue(KEYS.AVATAR_INTERVAL_MS, String(next.intervalMs)),
+    await setConfigValue(KEYS.AVATAR_INTERVAL_MS, String(next.intervalMs)),
   ]);
 
   return next;
@@ -63,19 +68,22 @@ export async function updateAvatarCleanupConfig(input: Partial<AvatarCleanupConf
 export async function getThreadPoolConfig(): Promise<ThreadPoolConfig> {
   const os = await import('os');
   const defaultMax = os.cpus().length;
-  
+
   const maxStr = await getConfigValue(KEYS.THREAD_POOL_MAX);
   return {
     maxThreads: maxStr ? Math.max(1, Number(maxStr)) : defaultMax,
   };
 }
 
-export async function updateThreadPoolConfig(input: Partial<ThreadPoolConfig>): Promise<ThreadPoolConfig> {
+export async function updateThreadPoolConfig(
+  input: Partial<ThreadPoolConfig>
+): Promise<ThreadPoolConfig> {
   const current = await getThreadPoolConfig();
   const next: ThreadPoolConfig = {
-    maxThreads: typeof input.maxThreads === 'number' ? Math.max(1, input.maxThreads) : current.maxThreads,
+    maxThreads:
+      typeof input.maxThreads === 'number' ? Math.max(1, input.maxThreads) : current.maxThreads,
   };
-  
+
   await setConfigValue(KEYS.THREAD_POOL_MAX, String(next.maxThreads));
   return next;
 }

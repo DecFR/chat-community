@@ -3,6 +3,16 @@ import { useFriendStore } from '../stores/friendStore';
 import { friendAPI } from '../lib/api';
 import { UserAvatar } from './UserAvatar';
 import { toast } from '../stores/toastStore';
+import { socketService } from '../lib/socket';
+
+interface FriendRequest {
+  id: string;
+  sender: {
+    username: string;
+    avatarUrl?: string;
+    bio?: string;
+  };
+}
 
 export default function FriendRequestsPanel() {
   const { pendingRequests, loadPendingRequests, loadFriends } = useFriendStore();
@@ -12,6 +22,21 @@ export default function FriendRequestsPanel() {
     loadPendingRequests();
   }, [loadPendingRequests]);
 
+  useEffect(() => {
+    const socket = socketService.getSocket();
+    if (!socket) return;
+
+    const handleNewFriendRequest = () => {
+      loadPendingRequests();
+    };
+
+    socket.on('newFriendRequest', handleNewFriendRequest);
+
+    return () => {
+      socket.off('newFriendRequest', handleNewFriendRequest);
+    };
+  }, [loadPendingRequests]);
+
   const handleAccept = async (requestId: string) => {
     setIsLoading(true);
     try {
@@ -19,9 +44,12 @@ export default function FriendRequestsPanel() {
       await loadPendingRequests();
       await loadFriends();
       toast.success('已接受好友请求');
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to accept friend request:', error);
-      toast.error(error?.response?.data?.error || '接受好友请求失败');
+      const errorMessage = error instanceof Error && 'response' in error
+        ? ((error as { response?: { data?: { error?: string } } }).response?.data?.error || '接受好友请求失败')
+        : '接受好友请求失败';
+      toast.error(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -33,9 +61,12 @@ export default function FriendRequestsPanel() {
       await friendAPI.declineRequest(requestId);
       await loadPendingRequests();
       toast.success('已拒绝好友请求');
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Failed to reject friend request:', error);
-      toast.error(error?.response?.data?.error || '拒绝好友请求失败');
+      const errorMessage = error instanceof Error && 'response' in error
+        ? ((error as { response?: { data?: { error?: string } } }).response?.data?.error || '拒绝好友请求失败')
+        : '拒绝好友请求失败';
+      toast.error(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -62,7 +93,7 @@ export default function FriendRequestsPanel() {
       </h2>
 
       <div className="space-y-1">
-        {pendingRequests.map((request: any) => (
+        {pendingRequests.map((request: FriendRequest) => (
           <div
             key={request.id}
             className="bg-discord-darker p-2 rounded flex items-center justify-between hover:bg-discord-gray transition-colors"

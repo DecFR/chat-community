@@ -16,7 +16,7 @@ import NotificationCenter from '../components/NotificationCenter';
 export default function MainLayout() {
   const navigate = useNavigate();
   const { user, isAuthenticated, loadUser } = useAuthStore();
-  const { isServersLoaded, loadServers, selectServer } = useServerStore();
+  const { isServersLoaded, loadServers, selectServer, servers } = useServerStore();
   const location = useLocation();
   const { loadFriends, loadPendingRequests, updateFriendStatus, friends } = useFriendStore();
   const [showSettings, setShowSettings] = useState(false);
@@ -74,7 +74,7 @@ export default function MainLayout() {
       }
     };
     run();
-  }, [user, isServersLoaded, friends.length]);
+  }, [user, isServersLoaded, friends.length, setChannelCount, setDMCount]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -125,6 +125,18 @@ export default function MainLayout() {
     };
   }, [isAuthenticated, navigate, loadUser, isServersLoaded, loadServers, loadFriends, loadPendingRequests, updateFriendStatus]);
 
+  // 确保始终加入所有已加载服务器房间（包括后来新建/加入的）
+  useEffect(() => {
+    const joined = (MainLayout as any)._joinedServers || new Set<string>();
+    (MainLayout as any)._joinedServers = joined;
+    servers.forEach(s => {
+      if (s?.id && !joined.has(s.id)) {
+        socketService.joinServer(s.id);
+        joined.add(s.id);
+      }
+    });
+  }, [servers]);
+
   // 监听服务器和频道变化,实时更新
   useEffect(() => {
     if (!isAuthenticated || !user) return;
@@ -162,6 +174,23 @@ export default function MainLayout() {
       selectServer('');
     }
   }, [location.pathname, selectServer]);
+
+  // 监听自身资料更新（头像、昵称）以便全局同步
+  useEffect(() => {
+    const currentUserId = user?.id;
+    if (!currentUserId) return;
+    const handleSelfProfileUpdate = (data: { userId: string; avatarUrl?: string; username?: string }) => {
+      if (data.userId !== currentUserId) return;
+      useAuthStore.getState().updateUser({
+        ...(data.avatarUrl !== undefined && { avatarUrl: data.avatarUrl }),
+        ...(data.username && { username: data.username })
+      });
+    };
+    socketService.on('userProfileUpdate', handleSelfProfileUpdate);
+    return () => {
+      socketService.off('userProfileUpdate', handleSelfProfileUpdate);
+    };
+  }, [user?.id]);
 
   // 全局监听新消息以更新未读计数
   useEffect(() => {
@@ -204,14 +233,22 @@ export default function MainLayout() {
       }
     };
 
-    socketService.on('channelMessage', handleChannelMessage);
-    socketService.on('directMessage', handleDirectMessage);
+    const socket = socketService.getSocket();
+    if (!socket) return;
+    
+    // 先移除可能存在的旧监听器,防止重复注册
+    socket.off('channelMessage');
+    socket.off('directMessage');
+    
+    // 注册新监听器
+    socket.on('channelMessage', handleChannelMessage);
+    socket.on('directMessage', handleDirectMessage);
 
     return () => {
-      socketService.off('channelMessage', handleChannelMessage);
-      socketService.off('directMessage', handleDirectMessage);
+      socket.off('channelMessage', handleChannelMessage);
+      socket.off('directMessage', handleDirectMessage);
     };
-  }, [location.pathname, user, incrementChannel, incrementDM]);
+  }, [location.pathname, user?.id, incrementChannel, incrementDM]);
 
   // 应用用户的主题设置
   useEffect(() => {

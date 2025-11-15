@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
+
 import { authService } from '../services/auth.service';
 import { successResponse, errorResponse } from '../utils/response';
 
@@ -18,11 +19,7 @@ export const authController = {
     body('password')
       .isLength({ min: 6 })
       .withMessage('Password must be at least 6 characters long'),
-    body('email')
-      .optional()
-      .trim()
-      .isEmail()
-      .withMessage('Invalid email address'),
+    body('email').optional().trim().isEmail().withMessage('Invalid email address'),
 
     // 处理函数
     async (req: Request, res: Response) => {
@@ -36,8 +33,9 @@ export const authController = {
         const result = await authService.register({ username, password, email, inviteCode });
 
         res.status(201).json(successResponse(result, 'User registered successfully'));
-      } catch (error: any) {
-        res.status(400).json(errorResponse(error.message));
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'An unknown error occurred';
+        res.status(400).json(errorResponse(message));
       }
     },
   ],
@@ -62,8 +60,9 @@ export const authController = {
         const result = await authService.login({ username, password });
 
         res.json(successResponse(result, 'Login successful'));
-      } catch (error: any) {
-        res.status(401).json(errorResponse(error.message));
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'An unknown error occurred';
+        res.status(401).json(errorResponse(message));
       }
     },
   ],
@@ -75,8 +74,9 @@ export const authController = {
     try {
       const user = await authService.getCurrentUser(req.user!.id);
       res.json(successResponse(user));
-    } catch (error: any) {
-      res.status(404).json(errorResponse(error.message));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'An unknown error occurred';
+      res.status(404).json(errorResponse(message));
     }
   },
 };

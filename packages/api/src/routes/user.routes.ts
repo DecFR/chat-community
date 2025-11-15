@@ -1,16 +1,24 @@
-import { Router } from 'express';
-import multer from 'multer';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+import { Request, Router } from 'express';
+import multer from 'multer';
 import { nanoid } from 'nanoid';
-import { authMiddleware } from '../middleware/auth';
-import { userController } from '../controllers/user.controller';
+
+import { userController } from '../controllers/user.controller.js';
+import { authMiddleware } from '../middleware/auth.js';
 
 const router = Router();
+
+// ESM 解析当前文件目录，统一 uploads 绝对路径
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const UPLOAD_DIR = path.resolve(__dirname, '../../uploads');
 
 // 配置 Multer 用于文件上传
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => {
-    cb(null, path.join(__dirname, '../../uploads'));
+    cb(null, UPLOAD_DIR);
   },
   filename: (_req, file, cb) => {
     const ext = path.extname(file.originalname);
@@ -19,7 +27,7 @@ const storage = multer.diskStorage({
   },
 });
 
-const fileFilter = (_req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+const fileFilter = (_req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
   const allowedTypes = /jpeg|jpg|png|gif|webp/;
   const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
   const mimetype = allowedTypes.test(file.mimetype);

@@ -47,20 +47,26 @@ export const userService = {
   async updateProfile(userId: string, updates: UpdateProfileData) {
     // 验证用户名唯一性
     if (updates.username) {
-      const existingUser = await prisma.user.findUnique({
-        where: { username: updates.username },
+      const existingUser = await prisma.user.findFirst({
+        where: {
+          username: updates.username,
+          NOT: { id: userId }
+        },
       });
-      if (existingUser && existingUser.id !== userId) {
+      if (existingUser) {
         throw new Error('用户名已被使用');
       }
     }
 
     // 验证邮箱唯一性
     if (updates.email) {
-      const existingUser = await prisma.user.findUnique({
-        where: { email: updates.email },
+      const existingUser = await prisma.user.findFirst({
+        where: {
+          email: updates.email,
+          NOT: { id: userId }
+        },
       });
-      if (existingUser && existingUser.id !== userId) {
+      if (existingUser) {
         throw new Error('邮箱已被使用');
       }
     }
@@ -146,7 +152,7 @@ export const userService = {
 
     if (!currentUserId || users.length === 0) return users;
 
-    const targetIds = users.map(u => u.id);
+    const targetIds = users.map((u) => u.id);
     const friendships = await prisma.friendship.findMany({
       where: {
         OR: [
@@ -162,7 +168,10 @@ export const userService = {
       },
     });
 
-    const relByUser = new Map<string, 'FRIEND' | 'OUTGOING_PENDING' | 'INCOMING_PENDING' | 'NONE'>();
+    const relByUser = new Map<
+      string,
+      'FRIEND' | 'OUTGOING_PENDING' | 'INCOMING_PENDING' | 'NONE'
+    >();
     for (const u of users) relByUser.set(u.id, 'NONE');
     for (const f of friendships) {
       if (f.status === 'ACCEPTED') {
@@ -177,7 +186,7 @@ export const userService = {
     }
 
     // 将关系附加到返回对象
-    return users.map(u => ({ ...u, relationship: relByUser.get(u.id) || 'NONE' }));
+    return users.map((u) => ({ ...u, relationship: relByUser.get(u.id) || 'NONE' }));
   },
 
   /**
@@ -185,7 +194,7 @@ export const userService = {
    */
   async updatePassword(userId: string, currentPassword: string, newPassword: string) {
     const bcrypt = await import('bcryptjs');
-    
+
     // 获取用户当前密码
     const user = await prisma.user.findUnique({
       where: { id: userId },

@@ -1,10 +1,17 @@
-import { parentPort, workerData } from 'worker_threads';
-import path from 'path';
 import fs from 'fs/promises';
+import path from 'path';
+import { parentPort, workerData } from 'worker_threads';
+
 import prisma from './prisma';
 
 // 只实现头像清理任务
-async function cleanupUnusedAvatarsWorker({ uploadDir, maxAgeMs }: { uploadDir: string; maxAgeMs: number }) {
+async function cleanupUnusedAvatarsWorker({
+  uploadDir,
+  maxAgeMs,
+}: {
+  uploadDir: string;
+  maxAgeMs: number;
+}) {
   try {
     const files = await fs.readdir(uploadDir);
     const avatarFiles = files.filter((name) => name.startsWith('avatar-'));
@@ -29,7 +36,7 @@ async function cleanupUnusedAvatarsWorker({ uploadDir, maxAgeMs }: { uploadDir: 
       } catch {}
     }
     return { removed };
-  } catch (e) {
+  } catch {
     return { removed: 0 };
   }
 }

@@ -1,18 +1,27 @@
-import { Router } from 'express';
-import { authMiddleware } from '../middleware/auth';
-import multer from 'multer';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+import { Message, User, MessageAttachment } from '@prisma/client';
+import { Router } from 'express';
+import multer from 'multer';
 import { nanoid } from 'nanoid';
+
+import { authMiddleware } from '../middleware/auth.js';
 
 const router = Router();
 
 // 所有消息路由都需要认证
 router.use(authMiddleware);
 
+// 解析当前文件目录，构造 uploads 绝对路径（ESM 无 __dirname）
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const UPLOAD_DIR = path.resolve(__dirname, '../../uploads');
+
 // 媒体上传（图片/视频/文件）
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => {
-    cb(null, path.join(__dirname, '../../uploads'));
+    cb(null, UPLOAD_DIR);
   },
   filename: (_req, file, cb) => {
     const ext = path.extname(file.originalname);
@@ -26,6 +35,11 @@ const upload = multer({
     fileSize: 50 * 1024 * 1024, // 单个媒体最大 50MiB
   },
 });
+
+type MessageWithAuthorAndAttachments = Message & {
+  author: Pick<User, 'id' | 'username' | 'avatarUrl'>;
+  attachments: MessageAttachment[];
+};
 
 /**
  * @route   POST /api/messages/upload
@@ -54,8 +68,9 @@ router.post('/upload', upload.single('file'), async (req, res) => {
         size: req.file.size,
       },
     });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    return res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -68,17 +83,49 @@ router.get('/channel/:channelId', async (req, res) => {
   try {
     const { channelId } = req.params;
     const limit = parseInt(req.query.limit as string) || 50;
-    const before = req.query.before as string | undefined;
-    const after = req.query.after as string | undefined;
+    const beforeId = req.query.before as string | undefined;
+    const afterId = req.query.after as string | undefined;
 
-    const prisma = (await import('../utils/prisma')).default;
-    const { decrypt } = await import('../utils/encryption');
+    const prisma = (await import('../utils/prisma.js')).default;
+    const { decrypt } = await import('../utils/encryption.js');
+
+    // 将 before/after 的消息ID转换为 createdAt 光标，避免使用 cuid 进行比较
+    let beforeCursor: Date | undefined;
+    let afterCursor: Date | undefined;
+    if (beforeId) {
+      const m = await prisma.message.findUnique({
+        where: { id: beforeId },
+        select: { createdAt: true },
+      });
+      beforeCursor = m?.createdAt;
+    }
+    if (afterId) {
+      const m = await prisma.message.findUnique({
+        where: { id: afterId },
+        select: { createdAt: true },
+      });
+      afterCursor = m?.createdAt;
+    }
 
     const messages = await prisma.message.findMany({
       where: {
         channelId,
-        ...(before && { id: { lt: before } }),
-        ...(after && { id: { gt: after } }),
+        ...(beforeCursor && beforeId
+          ? {
+              OR: [
+                { createdAt: { lt: beforeCursor } },
+                { AND: [{ createdAt: beforeCursor }, { id: { lt: beforeId } }] },
+              ],
+            }
+          : {}),
+        ...(afterCursor && afterId
+          ? {
+              OR: [
+                { createdAt: { gt: afterCursor } },
+                { AND: [{ createdAt: afterCursor }, { id: { gt: afterId } }] },
+              ],
+            }
+          : {}),
       },
       include: {
         author: {
@@ -90,23 +137,25 @@ router.get('/channel/:channelId', async (req, res) => {
         },
         attachments: true,
       },
-      orderBy: {
-        createdAt: after ? 'asc' : 'desc',
-      },
+      orderBy: [{ createdAt: afterCursor ? 'asc' : 'desc' }, { id: afterCursor ? 'asc' : 'desc' }],
       take: limit,
     });
 
     // 解密消息
-    const decryptedMessages = messages.map((msg: any) => ({
+    const decryptedMessages = messages.map((msg: MessageWithAuthorAndAttachments) => ({
       ...msg,
       content: decrypt(msg.encryptedContent),
       encryptedContent: undefined,
     }));
 
     // 如果是 after 查询，消息已经是正序，不需要 reverse
-    res.json({ success: true, data: after ? decryptedMessages : decryptedMessages.reverse() });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    res.json({
+      success: true,
+      data: afterCursor ? decryptedMessages : decryptedMessages.reverse(),
+    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -119,17 +168,48 @@ router.get('/conversation/:conversationId', async (req, res) => {
   try {
     const { conversationId } = req.params;
     const limit = parseInt(req.query.limit as string) || 50;
-    const before = req.query.before as string | undefined;
-    const after = req.query.after as string | undefined;
+    const beforeId = req.query.before as string | undefined;
+    const afterId = req.query.after as string | undefined;
 
-    const prisma = (await import('../utils/prisma')).default;
-    const { decrypt } = await import('../utils/encryption');
+    const prisma = (await import('../utils/prisma.js')).default;
+    const { decrypt } = await import('../utils/encryption.js');
+
+    let beforeCursor: Date | undefined;
+    let afterCursor: Date | undefined;
+    if (beforeId) {
+      const m = await prisma.message.findUnique({
+        where: { id: beforeId },
+        select: { createdAt: true },
+      });
+      beforeCursor = m?.createdAt;
+    }
+    if (afterId) {
+      const m = await prisma.message.findUnique({
+        where: { id: afterId },
+        select: { createdAt: true },
+      });
+      afterCursor = m?.createdAt;
+    }
 
     const messages = await prisma.message.findMany({
       where: {
         directMessageConversationId: conversationId,
-        ...(before && { id: { lt: before } }),
-        ...(after && { id: { gt: after } }),
+        ...(beforeCursor && beforeId
+          ? {
+              OR: [
+                { createdAt: { lt: beforeCursor } },
+                { AND: [{ createdAt: beforeCursor }, { id: { lt: beforeId } }] },
+              ],
+            }
+          : {}),
+        ...(afterCursor && afterId
+          ? {
+              OR: [
+                { createdAt: { gt: afterCursor } },
+                { AND: [{ createdAt: afterCursor }, { id: { gt: afterId } }] },
+              ],
+            }
+          : {}),
       },
       include: {
         author: {
@@ -141,23 +221,25 @@ router.get('/conversation/:conversationId', async (req, res) => {
         },
         attachments: true,
       },
-      orderBy: {
-        createdAt: after ? 'asc' : 'desc',
-      },
+      orderBy: [{ createdAt: afterCursor ? 'asc' : 'desc' }, { id: afterCursor ? 'asc' : 'desc' }],
       take: limit,
     });
 
     // 解密消息
-    const decryptedMessages = messages.map((msg: any) => ({
+    const decryptedMessages = messages.map((msg: MessageWithAuthorAndAttachments) => ({
       ...msg,
       content: decrypt(msg.encryptedContent),
       encryptedContent: undefined,
     }));
 
     // 如果是 after 查询，消息已经是正序，不需要 reverse
-    res.json({ success: true, data: after ? decryptedMessages : decryptedMessages.reverse() });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    res.json({
+      success: true,
+      data: afterCursor ? decryptedMessages : decryptedMessages.reverse(),
+    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -171,7 +253,7 @@ router.get('/conversation/:friendId/state', async (req, res) => {
     const { friendId } = req.params;
     const userId = req.user!.id;
 
-    const prisma = (await import('../utils/prisma')).default;
+    const prisma = (await import('../utils/prisma.js')).default;
 
     // 查找或创建会话
     let conversation = await prisma.directMessageConversation.findFirst({
@@ -204,8 +286,9 @@ router.get('/conversation/:friendId/state', async (req, res) => {
     });
 
     res.json({ success: true, data: { ...state, conversationId: conversation.id } });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -219,7 +302,7 @@ router.get('/channel/:channelId/state', async (req, res) => {
     const { channelId } = req.params;
     const userId = req.user!.id;
 
-    const prisma = (await import('../utils/prisma')).default;
+    const prisma = (await import('../utils/prisma.js')).default;
 
     const state = await prisma.userChannelState.findUnique({
       where: {
@@ -231,8 +314,9 @@ router.get('/channel/:channelId/state', async (req, res) => {
     });
 
     res.json({ success: true, data: state || null });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    res.status(500).json({ success: false, error: message });
   }
 });
 

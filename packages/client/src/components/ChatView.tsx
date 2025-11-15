@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { useServerStore } from '../stores/serverStore';
 import { useFriendStore } from '../stores/friendStore';
@@ -92,9 +92,12 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
   }, [isDM, channelId]);
 
   const [messages, setMessages] = useState<Message[]>([]);
+  const messagesRef = useRef<Message[]>([]);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
+  const loadSeqRef = useRef(0);
   const [newMessage, setNewMessage] = useState('');
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [lastReadMessageId, setLastReadMessageId] = useState<string | null>(null);
@@ -102,7 +105,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
   const prevChannelRef = useRef<string | null>(null);
   const prevConversationRef = useRef<string | null>(null);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
-  const typingTimeoutsRef = useRef<Record<string, any>>({});
+  const typingTimeoutsRef = useRef<Record<string, number>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const loadMoreTriggerRef = useRef<HTMLDivElement>(null);
@@ -110,18 +113,18 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
   const [firstUnreadIndex, setFirstUnreadIndex] = useState<number | null>(null);
   // 追踪上一次加载的目标ID,防止不必要的重新加载导致消息丢失
   const lastLoadedTargetRef = useRef<string>('');
+  const [isNearBottom, setIsNearBottom] = useState(true);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const scrollToFirstUnread = () => {
-    if (firstUnreadRef.current) {
-      firstUnreadRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    } else {
-      scrollToBottom();
+  const scrollToFirstUnread = useCallback(() => {
+    const firstUnread = document.querySelector('.first-unread-message');
+    if (firstUnread) {
+      firstUnread.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-  };
+  }, []);
 
   // 获取已读位置
   useEffect(() => {
@@ -134,21 +137,12 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
   }, [isDM, friendId, channelId, user]);
 
   // 计算并按阅读量递减未读计数，然后标记为已读
-  const markAsRead = () => {
+  const markAsRead = useCallback(() => {
     const targetId = isDM ? friendId : channelId;
     if (!targetId || !user || messages.length === 0) return;
     
     const lastMessage = messages[messages.length - 1];
     const key = `lastRead_${user.id}_${targetId}`;
-    const prevLastRead = localStorage.getItem(key);
-
-    // 统计这次新读了多少条（只统计他人消息）
-    let startIndex = 0;
-    if (prevLastRead) {
-      const idx = messages.findIndex((m) => m.id === prevLastRead);
-      startIndex = idx >= 0 ? idx + 1 : 0;
-    }
-    const newlyRead = messages.slice(startIndex).filter((m) => m.authorId !== user.id).length;
 
     localStorage.setItem(key, lastMessage.id);
     setLastReadMessageId(lastMessage.id);
@@ -156,119 +150,106 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
     // 同步服务端阅读位置
     if (isDM && dmConversationId) {
       socketService.markConversationAsRead(dmConversationId, lastMessage.id);
-      if (friendId && newlyRead > 0) {
-        decrementDM(friendId, newlyRead);
+      if (friendId) {
+        // 直接清零未读计数
+        const { clearDM } = useUnreadStore.getState();
+        clearDM(friendId);
       }
     } else if (!isDM && channelId) {
       socketService.markChannelAsRead(channelId, lastMessage.id);
-      if (newlyRead > 0) {
-        decrementChannel(channelId, newlyRead);
-      }
+      // 直接清零未读计数
+      const { clearChannel } = useUnreadStore.getState();
+      clearChannel(channelId);
     }
-  };
+  }, [isDM, friendId, channelId, user, messages, dmConversationId, decrementDM, decrementChannel]);
 
-  // 加载消息
+  // 首次加载消息
   useEffect(() => {
-    const targetId = isDM ? friendId : channelId;
-    if (!targetId) {
-      // 清空消息仅当真正离开频道时
-      if (lastLoadedTargetRef.current) {
-        setMessages([]);
-        lastLoadedTargetRef.current = '';
-      }
-      return;
-    }
-
-    // 只有当targetId真正改变时才重新加载,避免因其他原因导致的组件重渲染清空消息
-    if (lastLoadedTargetRef.current === targetId) {
-      return;
-    }
-    lastLoadedTargetRef.current = targetId;
-
     const loadMessages = async () => {
+      const mySeq = ++loadSeqRef.current;
+      const targetId = isDM ? friendId : channelId;
+      // 离开会话/频道时清理
+      if (!targetId) {
+        setMessages([]);
+        setDmConversationId(null);
+        lastLoadedTargetRef.current = '';
+        return;
+      }
+      // 如果是同一个目标且已有消息,不重复加载(防止切换tab时重复请求)
+      if (lastLoadedTargetRef.current === targetId && messages.length > 0) return;
+      lastLoadedTargetRef.current = targetId;
+
+      const key = `lastRead_${user?.id}_${targetId}`;
+      const savedLastRead = localStorage.getItem(key);
       setIsLoading(true);
-      setHasMore(true);
+
       try {
-        // 检查是否有已读位置
-        const key = `lastRead_${user?.id}_${targetId}`;
-        const savedLastRead = localStorage.getItem(key);
-        
         if (isDM && friendId) {
-          // 私聊：先获取或创建会话，然后获取消息
           const stateResponse = await messageAPI.getConversationState(friendId);
           const conversationId = stateResponse.data.data?.conversationId;
           setDmConversationId(conversationId || null);
-          
-          if (conversationId) {
-            let response;
-            if (savedLastRead) {
-              // Telegram 风格：前20条上下文 + 未读之后消息
-              const olderRes = await messageAPI.getConversationMessages(conversationId, 20, savedLastRead);
-              const newerRes = await messageAPI.getConversationMessages(conversationId, 100, undefined, savedLastRead);
-              const older = olderRes.data.data || [];
-              const newer = newerRes.data.data || [];
-              const loaded = [...older, ...newer];
-              setMessages(loaded);
-              setFirstUnreadIndex(older.length);
-              setHasMore(true);
-            } else {
-              // 没有已读位置，加载最新50条
-              response = await messageAPI.getConversationMessages(conversationId, 50);
-              const loadedMessages = response.data.data;
-              setMessages(loadedMessages);
-              setHasMore(loadedMessages.length === 50);
-            }
-          } else {
-            // 新会话，暂时没有消息
+          if (!conversationId) {
             setMessages([]);
             setHasMore(false);
+          } else {
+            // 始终加载最新 N 条，避免基于 lastRead 导致最新一条缺失
+            const res = await messageAPI.getConversationMessages(conversationId, 50);
+            const loaded = (res.data.data || []) as Message[];
+            const uniqueMap = new Map<string, Message>();
+            loaded.forEach((m: Message, idx) => {
+              const key = m.id || `temp-${idx}-${Date.now()}-${Math.random()}`;
+              (m as any)._key = key;
+              uniqueMap.set(key, m);
+            });
+            const list = Array.from(uniqueMap.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+            if (mySeq === loadSeqRef.current) setMessages(list);
+            setHasMore(loaded.length === 50);
+
+            // 计算未读分隔线位置（如命中则在该元素后显示）
+            if (savedLastRead) {
+              const idx = list.findIndex(m => m.id === savedLastRead || (m as any)._key === savedLastRead);
+              setFirstUnreadIndex(idx >= 0 ? idx + 1 : null);
+            }
           }
         } else if (channelId) {
-          // 频道消息：请求服务端阅读状态
+          // 频道：同样加载最新 N 条
+          const res = await messageAPI.getChannelMessages(channelId, 50);
+          const loaded = (res.data.data || []) as Message[];
+          const uniqueMap = new Map<string, Message>();
+          loaded.forEach((m: Message, idx) => {
+            const key = m.id || `temp-${idx}-${Date.now()}-${Math.random()}`;
+            (m as any)._key = key;
+            uniqueMap.set(key, m);
+          });
+          const list = Array.from(uniqueMap.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+          if (mySeq === loadSeqRef.current) setMessages(list);
+          setHasMore(loaded.length === 50);
+
+          // 读取服务端 lastRead 仅用于定位分隔线，不影响加载范围
           const stateRes = await messageAPI.getChannelState(channelId);
           const serverLastRead = stateRes.data.data?.lastReadMessageId as string | undefined;
-
-          let response;
           const effectiveLastRead = savedLastRead || serverLastRead;
           if (effectiveLastRead) {
-            const olderRes = await messageAPI.getChannelMessages(targetId, 20, effectiveLastRead);
-            const newerRes = await messageAPI.getChannelMessages(targetId, 100, undefined, effectiveLastRead);
-            const older = olderRes.data.data || [];
-            const newer = newerRes.data.data || [];
-            const loaded = [...older, ...newer];
-            setMessages(loaded);
-            setFirstUnreadIndex(older.length);
-            setHasMore(true);
-          } else {
-            response = await messageAPI.getChannelMessages(targetId, 50);
-            const loadedMessages = response.data.data;
-            setMessages(loadedMessages);
-            setHasMore(loadedMessages.length === 50);
+            const idx = list.findIndex(m => m.id === effectiveLastRead || (m as any)._key === effectiveLastRead);
+            setFirstUnreadIndex(idx >= 0 ? idx + 1 : null);
           }
         }
-        
-        // 根据是否有已读位置决定滚动行为
+
+        // 滚动行为
         if (savedLastRead) {
-          // 有已读位置时，滚动到第一条未读消息
           setTimeout(() => scrollToFirstUnread(), 100);
         } else {
-          // 没有已读位置，滚动到底部
           setTimeout(() => scrollToBottom(), 100);
         }
-      } catch (error) {
-        console.error('Failed to load messages:', error);
-        setMessages([]);
-        setHasMore(false);
       } finally {
         setIsLoading(false);
       }
     };
-
     loadMessages();
-  }, [isDM, friendId, channelId]);
+  }, [isDM, friendId, channelId, user?.id]);
 
   // 加载更多消息(历史记录)
-  const loadMoreMessages = async () => {
+  const loadMoreMessages = useCallback(async () => {
     if (isLoadingMore || !hasMore || messages.length === 0) return;
 
     setIsLoadingMore(true);
@@ -277,10 +258,17 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
       let response;
       
       if (isDM && friendId) {
-        // 私聊模式:需要先获取 conversationId
-        const stateRes = await messageAPI.getConversationState(friendId);
-        const conversationId = stateRes.data.data.conversationId;
-        setDmConversationId(conversationId || null);
+        // 私聊模式: 优先使用已有会话ID，避免重复请求
+        let conversationId = dmConversationId;
+        if (!conversationId) {
+          const stateRes = await messageAPI.getConversationState(friendId);
+          conversationId = stateRes.data.data.conversationId;
+          setDmConversationId(conversationId || null);
+        }
+        if (!conversationId) {
+          setIsLoadingMore(false);
+          return;
+        }
         response = await messageAPI.getConversationMessages(conversationId, 50, oldestMessage.id);
       } else if (channelId) {
         // 频道模式
@@ -297,7 +285,17 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
         const container = messagesContainerRef.current;
         const scrollHeightBefore = container?.scrollHeight || 0;
         
-        setMessages((prev) => [...olderMessages, ...prev]);
+        setMessages((prev) => {
+          const merged: Message[] = [...olderMessages, ...prev];
+          const uniqueMap = new Map<string, Message>();
+          merged.forEach((m: Message, idx) => {
+            const key = m.id || (m as any)._key || `temp-${idx}-${Date.now()}-${Math.random()}`;
+            (m as any)._key = key;
+            uniqueMap.set(key, m);
+          });
+          const unique = Array.from(uniqueMap.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+          return unique;
+        });
         setHasMore(olderMessages.length === 50);
         
         // 恢复滚动位置，避免跳动
@@ -315,7 +313,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
     } finally {
       setIsLoadingMore(false);
     }
-  };
+  }, [isLoadingMore, hasMore, messages, isDM, friendId, channelId]);
 
   // 进入/离开私聊会话房间（用于 typing 等）
   useEffect(() => {
@@ -356,7 +354,28 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
         observer.unobserve(trigger);
       }
     };
-  }, [hasMore, isLoadingMore, messages]);
+  }, [hasMore, isLoadingMore, loadMoreMessages]);
+
+  // 监听滚动位置，检测是否在底部
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container;
+      const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+      const nearBottom = distanceFromBottom < 100; // 100px阈值
+      setIsNearBottom(nearBottom);
+
+      // 如果滚动到底部，清零未读计数
+      if (nearBottom && messages.length > 0) {
+        markAsRead();
+      }
+    };
+
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [messages.length, isDM, friendId, channelId, markAsRead]);
 
   // 监听新消息
   useEffect(() => {
@@ -364,45 +383,118 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
     if (!targetId) return;
 
     const currentUserId = user?.id;
+    const socket = socketService.getSocket();
+    if (!socket) return;
 
     const handleNewMessage = (message: Message & { channelId?: string; directMessageConversationId?: string }) => {
       // 只处理频道消息，必须有 channelId 且没有 directMessageConversationId
       if (!isDM && message.channelId && !message.directMessageConversationId && message.channelId === targetId) {
         setMessages((prev) => {
-          if (prev.some(m => m.id === message.id)) {
-            return prev;
-          }
-          return [...prev, message];
+          const exists = prev.some(m => (m as any)._key ? (m as any)._key === ((message as any)._key || message.id) : m.id === message.id);
+          if (exists) return prev;
+          const merged = [...prev, message];
+          const uniq = new Map<string, Message>();
+          merged.forEach((m: Message, idx) => {
+            const key = (m as any)._key || m.id || `temp-${idx}-${Date.now()}-${Math.random()}`;
+            (m as any)._key = key;
+            uniq.set(key, m);
+          });
+          return Array.from(uniq.values());
         });
-        setTimeout(() => scrollToBottom(), 100);
-        setTimeout(() => markAsRead(), 500);
+        // 只有在接近底部时才自动滚动
+        if (isNearBottom) {
+          setTimeout(() => scrollToBottom(), 100);
+          setTimeout(() => markAsRead(), 500);
+        }
       }
     };
 
-    const handleDirectMessage = (message: Message) => {
-      if (isDM && (message.authorId === friendId || message.authorId === currentUserId)) {
-        setMessages((prev) => {
-          if (prev.some(m => m.id === message.id)) {
-            return prev;
+    const handleDirectMessage = (message: Message & { directMessageConversationId?: string }) => {
+      // 检查消息是否属于当前DM会话
+      if (isDM && friendId) {
+        // 消息应该显示在当前会话中(发送者是当前用户或好友)
+        const isMyMessage = message.authorId === currentUserId;
+        const isFriendMessage = message.authorId === friendId;
+        
+        if (isMyMessage || isFriendMessage) {
+          setMessages((prev) => {
+            const exists = prev.some(m => (m as any)._key ? (m as any)._key === ((message as any)._key || message.id) : m.id === message.id);
+            if (exists) return prev;
+            const merged = [...prev, message];
+            const uniq = new Map<string, Message>();
+            merged.forEach((m: Message, idx) => {
+              const key = (m as any)._key || m.id || `temp-${idx}-${Date.now()}-${Math.random()}`;
+              (m as any)._key = key;
+              uniq.set(key, m);
+            });
+            return Array.from(uniq.values());
+          });
+          // 只有在接近底部时才自动滚动
+          if (isNearBottom) {
+            setTimeout(() => scrollToBottom(), 100);
+            setTimeout(() => markAsRead(), 500);
           }
-          return [...prev, message];
-        });
-        setTimeout(() => scrollToBottom(), 100);
-        setTimeout(() => markAsRead(), 500);
+        }
       }
     };
 
-    socketService.on('channelMessage', handleNewMessage);
-    socketService.on('directMessage', handleDirectMessage);
+    // 先移除可能存在的旧监听器
+    socket.off('channelMessage');
+    socket.off('directMessage');
+    socket.off('friendProfileUpdate');
+    socket.off('userProfileUpdate');
+    
+    // 注册新监听器
+    socket.on('channelMessage', handleNewMessage);
+    socket.on('directMessage', handleDirectMessage);
+
+    // 监听好友资料更新,实时刷新聊天消息中的头像
+    const handleProfileUpdate = (data: { userId: string; avatarUrl?: string; username?: string }) => {
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.authorId === data.userId
+            ? {
+                ...msg,
+                author: {
+                  ...msg.author,
+                  ...(data.avatarUrl !== undefined && { avatarUrl: data.avatarUrl }),
+                  ...(data.username && { username: data.username }),
+                },
+              }
+            : msg
+        )
+      );
+    };
+
+    socket.on('friendProfileUpdate', handleProfileUpdate);
+    socket.on('userProfileUpdate', handleProfileUpdate);
+    
+    // 监听好友删除事件
+    const handleFriendRemoved = (data: { friendId: string }) => {
+      if (isDM && friendId === data.friendId) {
+        // 清空消息并返回主页
+        setMessages([]);
+        lastLoadedTargetRef.current = '';
+        window.location.href = '/app';
+      }
+    };
+    socket.on('friendRemoved', handleFriendRemoved);
 
     return () => {
-      socketService.off('channelMessage', handleNewMessage);
-      socketService.off('directMessage', handleDirectMessage);
+      socket.off('channelMessage', handleNewMessage);
+      socket.off('directMessage', handleDirectMessage);
+      socket.off('friendProfileUpdate', handleProfileUpdate);
+      socket.off('userProfileUpdate', handleProfileUpdate);
+      socket.off('friendRemoved', handleFriendRemoved);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isDM, friendId, channelId, user?.id]);
 
   // 监听正在输入事件并管理显示列表
   useEffect(() => {
+    const socket = socketService.getSocket();
+    if (!socket) return;
+    
     const handleTyping = (data: { userId?: string; username?: string; channelId?: string; conversationId?: string }) => {
       const match = isDM ? data.conversationId === dmConversationId : data.channelId === channelId;
       if (!match || !data.username) return;
@@ -417,15 +509,16 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
       }, 3000);
     };
 
-    socketService.on('userTyping', handleTyping);
+    socket.off('userTyping');
+    socket.on('userTyping', handleTyping);
     return () => {
-      socketService.off('userTyping', handleTyping);
+      socket.off('userTyping', handleTyping);
     };
   }, [isDM, channelId, dmConversationId]);
 
   // 当消息加载完成或有新消息时，标记为已读
   useEffect(() => {
-    if (messages.length > 0) {
+    if (messages.length > 0 && isNearBottom) {
       // 延迟标记，给用户时间查看消息
       const timer = setTimeout(() => {
         markAsRead();
@@ -433,14 +526,21 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
       
       return () => clearTimeout(timer);
     }
-  }, [messages]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, isNearBottom]);
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim() && pendingFiles.length === 0) return;
 
     const send = async () => {
-      let attachments: any[] | undefined;
+      let attachments: Array<{
+        url: string;
+        type: 'IMAGE' | 'VIDEO' | 'FILE';
+        filename?: string;
+        mimeType?: string;
+        size?: number;
+      }> | undefined;
       if (pendingFiles.length > 0) {
         attachments = [];
         for (const f of pendingFiles) {
@@ -559,8 +659,9 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
               (firstUnreadIndex !== null && index === firstUnreadIndex) ||
               (lastReadMessageId && index > 0 && messages[index - 1].id === lastReadMessageId && message.authorId !== user?.id);
 
+            const renderKey = (message as any)._key || message.id;
             return (
-              <div key={message.id}>
+              <div key={renderKey}>
                 {showUnreadDivider && (
                   <div ref={firstUnreadRef} className="relative flex items-center py-4">
                     <div className="flex-1 border-t-2 border-discord-red"></div>
@@ -659,14 +760,14 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
                 setNewMessage(v);
                 // 发送 typing 事件（简单节流：1s）
                 const now = Date.now();
-                const last = (window as any).__typingEmitAt || 0;
+                const last = (window as Window & typeof globalThis & { __typingEmitAt?: number }).__typingEmitAt || 0;
                 if (now - last > 1000) {
                   if (isDM && dmConversationId) {
                     socketService.sendTyping({ conversationId: dmConversationId });
                   } else if (!isDM && channelId) {
                     socketService.sendTyping({ channelId });
                   }
-                  (window as any).__typingEmitAt = now;
+                  (window as Window & typeof globalThis & { __typingEmitAt?: number }).__typingEmitAt = now;
                 }
               }}
               placeholder="发送消息..."

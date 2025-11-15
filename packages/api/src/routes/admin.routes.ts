@@ -1,9 +1,10 @@
-import { getAdminNotifications } from '../utils/adminNotify';
 import { Router } from 'express';
+
 import { authMiddleware, adminMiddleware } from '../middleware/auth';
+import { getAdminNotifications } from '../utils/adminNotify';
+import { rescheduleAvatarCleanupScheduler } from '../utils/avatarCleanupScheduler';
 import { cleanupUnusedAvatars } from '../utils/cleanup';
 import { getAvatarCleanupConfig, updateAvatarCleanupConfig } from '../utils/config';
-import { rescheduleAvatarCleanupScheduler } from '../utils/avatarCleanupScheduler';
 
 const router = Router();
 /**
@@ -17,8 +18,9 @@ router.get('/notifications', async (req, res) => {
     if (!adminId) return res.status(401).json({ success: false, error: '未登录' });
     const notifies = await getAdminNotifications(adminId);
     res.json({ success: true, data: notifies });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -48,8 +50,9 @@ router.get('/users', async (_req, res) => {
     });
 
     res.json({ success: true, data: users });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -76,8 +79,9 @@ router.get('/servers', async (_req, res) => {
     });
 
     res.json({ success: true, data: servers });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -89,28 +93,29 @@ router.get('/servers', async (_req, res) => {
 router.delete('/users/:id', async (req, res) => {
   try {
     const prisma = (await import('../utils/prisma')).default;
-    
+
     // 获取第一个用户（超级管理员）
     const firstUser = await prisma.user.findFirst({
       orderBy: { createdAt: 'asc' },
       select: { id: true },
     });
-    
+
     // 检查是否尝试删除超级管理员
     if (firstUser && firstUser.id === req.params.id) {
-      return res.status(403).json({ 
-        success: false, 
-        error: '不能删除超级管理员（第一个用户）' 
+      return res.status(403).json({
+        success: false,
+        error: '不能删除超级管理员（第一个用户）',
       });
     }
-    
+
     await prisma.user.delete({
       where: { id: req.params.id },
     });
 
     res.json({ success: true, message: 'User deleted' });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -127,8 +132,9 @@ router.delete('/servers/:id', async (req, res) => {
     });
 
     res.json({ success: true, message: 'Server deleted' });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -143,22 +149,22 @@ router.delete('/messages', async (req, res) => {
     const prisma = (await import('../utils/prisma')).default;
     const { getIO } = await import('../socket');
     const io = getIO();
-    
+
     let deletedCount = 0;
-    
+
     if (channelId) {
       // 清理指定频道的消息
       const result = await prisma.message.deleteMany({
         where: { channelId: channelId as string },
       });
       deletedCount = result.count;
-      
+
       // 获取频道信息用于通知
       const channel = await prisma.channel.findUnique({
         where: { id: channelId as string },
         include: { server: true },
       });
-      
+
       // 广播通知到服务器房间
       if (channel) {
         io.to(`server-${channel.serverId}`).emit('notification', {
@@ -174,12 +180,12 @@ router.delete('/messages', async (req, res) => {
         where: { directMessageConversationId: conversationId as string },
       });
       deletedCount = result.count;
-      
+
       // 通知会话双方用户
       const conversation = await prisma.directMessageConversation.findUnique({
         where: { id: conversationId as string },
       });
-      
+
       if (conversation) {
         io.to(`user-${conversation.user1Id}`).emit('notification', {
           id: `msg-cleanup-${Date.now()}`,
@@ -198,7 +204,7 @@ router.delete('/messages', async (req, res) => {
       // 清理所有消息
       const result = await prisma.message.deleteMany({});
       deletedCount = result.count;
-      
+
       // 广播通知给所有在线用户
       io.emit('notification', {
         id: `msg-cleanup-${Date.now()}`,
@@ -207,14 +213,15 @@ router.delete('/messages', async (req, res) => {
         message: '管理员已清理系统所有消息',
       });
     }
-    
-    res.json({ 
-      success: true, 
-      message: 'Messages cleaned', 
-      deletedCount 
+
+    res.json({
+      success: true,
+      message: 'Messages cleaned',
+      deletedCount,
     });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -227,19 +234,20 @@ router.post('/invite-codes', async (req, res) => {
   try {
     const { userId, expiresInDays = 7 } = req.body;
     const { inviteService } = await import('../services/invite.service');
-    
+
     // 如果没有指定userId，使用当前登录的管理员ID
     const targetUserId = userId || req.user?.id;
-    
+
     if (!targetUserId) {
       return res.status(400).json({ success: false, error: '用户ID是必需的' });
     }
-    
+
     const inviteCode = await inviteService.generateUserInviteCode(targetUserId, expiresInDays);
-    
+
     res.json({ success: true, data: inviteCode });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -265,10 +273,11 @@ router.get('/invite-codes', async (_req, res) => {
         createdAt: 'desc',
       },
     });
-    
+
     res.json({ success: true, data: inviteCodes });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -281,25 +290,25 @@ router.patch('/users/:id/role', async (req, res) => {
   try {
     const prisma = (await import('../utils/prisma')).default;
     const { role } = req.body;
-    
+
     if (!['ADMIN', 'USER'].includes(role)) {
       return res.status(400).json({ success: false, error: '无效的角色' });
     }
-    
+
     // 获取第一个用户（超级管理员）
     const firstUser = await prisma.user.findFirst({
       orderBy: { createdAt: 'asc' },
       select: { id: true },
     });
-    
+
     // 检查是否尝试修改超级管理员的角色
     if (firstUser && firstUser.id === req.params.id && role !== 'ADMIN') {
-      return res.status(403).json({ 
-        success: false, 
-        error: '不能降低超级管理员（第一个用户）的权限' 
+      return res.status(403).json({
+        success: false,
+        error: '不能降低超级管理员（第一个用户）的权限',
       });
     }
-    
+
     const user = await prisma.user.update({
       where: { id: req.params.id },
       data: { role },
@@ -310,10 +319,11 @@ router.patch('/users/:id/role', async (req, res) => {
         role: true,
       },
     });
-    
+
     res.json({ success: true, data: user });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -327,8 +337,9 @@ router.post('/maintenance/cleanup-avatars', async (req, res) => {
     const { maxAgeMs } = req.body || {};
     const result = await cleanupUnusedAvatars(typeof maxAgeMs === 'number' ? maxAgeMs : undefined);
     res.json({ success: true, data: result });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -341,8 +352,9 @@ router.get('/config/cleanup-avatars', async (_req, res) => {
   try {
     const cfg = await getAvatarCleanupConfig();
     res.json({ success: true, data: cfg });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -365,8 +377,9 @@ router.put('/config/cleanup-avatars', async (req, res) => {
     // 保存后重置调度器
     await rescheduleAvatarCleanupScheduler();
     res.json({ success: true, data: next });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -378,19 +391,14 @@ router.put('/config/cleanup-avatars', async (req, res) => {
 router.get('/stats', async (_req, res) => {
   try {
     const prisma = (await import('../utils/prisma')).default;
-    
-    const [
-      totalUsers,
-      totalServers,
-      totalMessages,
-      onlineUsers,
-    ] = await Promise.all([
+
+    const [totalUsers, totalServers, totalMessages, onlineUsers] = await Promise.all([
       prisma.user.count(),
       prisma.server.count(),
       prisma.message.count(),
       prisma.user.count({ where: { status: 'ONLINE' } }),
     ]);
-    
+
     res.json({
       success: true,
       data: {
@@ -400,8 +408,9 @@ router.get('/stats', async (_req, res) => {
         onlineUsers,
       },
     });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -419,7 +428,7 @@ router.get('/system-info', async (_req, res) => {
     const platform = os.platform();
     const arch = os.arch();
     const uptime = os.uptime();
-    
+
     res.json({
       success: true,
       data: {
@@ -432,7 +441,7 @@ router.get('/system-info', async (_req, res) => {
           total: totalMem,
           free: freeMem,
           used: totalMem - freeMem,
-          usagePercent: ((totalMem - freeMem) / totalMem * 100).toFixed(2),
+          usagePercent: (((totalMem - freeMem) / totalMem) * 100).toFixed(2),
         },
         platform,
         arch,
@@ -440,8 +449,9 @@ router.get('/system-info', async (_req, res) => {
         nodeVersion: process.version,
       },
     });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -455,8 +465,9 @@ router.get('/config/thread-pool', async (_req, res) => {
     const { getThreadPoolConfig } = await import('../utils/config');
     const cfg = await getThreadPoolConfig();
     res.json({ success: true, data: cfg });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    res.status(500).json({ success: false, error: message });
   }
 });
 
@@ -471,12 +482,13 @@ router.put('/config/thread-pool', async (req, res) => {
     if (maxThreads !== undefined && (typeof maxThreads !== 'number' || maxThreads < 1)) {
       return res.status(400).json({ success: false, error: 'maxThreads 必须是大于 0 的整数' });
     }
-    
+
     const { updateThreadPoolConfig } = await import('../utils/config');
     const next = await updateThreadPoolConfig({ maxThreads });
     res.json({ success: true, data: next });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    res.status(500).json({ success: false, error: message });
   }
 });
 

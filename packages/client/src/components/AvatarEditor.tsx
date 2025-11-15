@@ -93,7 +93,7 @@ export default function AvatarEditor({ imageSrc, onSave, onCancel }: AvatarEdito
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4">
       <div className="bg-discord-darker rounded-lg shadow-2xl max-w-2xl w-full">
         {/* 标题栏 */}
         <div className="px-6 py-4 border-b border-discord-darkest">

@@ -2,6 +2,7 @@
   "name": "@chat-community/api",
   "version": "1.0.0",
   "description": "Chat & Community API Server",
+  "type": "module",
   "main": "dist/server.js",
   "scripts": {
     "dev": "prisma generate && prisma migrate dev --skip-generate && tsx watch src/server.ts",
@@ -9,7 +10,9 @@
     "start": "node dist/server.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:studio": "prisma studio"
+    "prisma:studio": "prisma studio",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "dependencies": {
     "@prisma/client": "^6.19.0",
@@ -24,7 +27,8 @@
     "nanoid": "^5.1.6",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
-    "socket.io": "^4.8.1"
+    "socket.io": "^4.8.1",
+    "winston": "^3.18.3"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
@@ -34,6 +38,13 @@
     "@types/node": "^24.10.1",
     "@types/passport": "^1.0.17",
     "@types/passport-jwt": "^4.0.1",
+    "@typescript-eslint/eslint-plugin": "^8.46.4",
+    "@typescript-eslint/parser": "^8.46.4",
+    "eslint": "^9.39.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-prettier": "^5.5.4",
+    "prettier": "^3.6.2",
     "prisma": "^6.19.0",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
