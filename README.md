@@ -107,6 +107,47 @@ pnpm run dev
 - **后端 API**: http://localhost:3000
 - **前端应用**: http://localhost:5173
 
+## ⚙️ 部署（使用 `deploy_ubuntu.sh`）
+
+仓库根目录包含一个脚本 `deploy_ubuntu.sh`，用于在 Ubuntu（例如 DigitalOcean Droplet）上从源码部署应用（安装依赖、构建、Prisma 迁移、使用 `pm2` 启动后端、配置 `nginx` 和可选的 `certbot` HTTPS）。下面是主要用法与注意事项。
+
+**文件**: `deploy_ubuntu.sh`
+
+**快速示例**
+
+交互式（推荐）——以非 root 用户登录并运行脚本（脚本会在需要时使用 `sudo`）:
+
+```bash
+cd /path/to/chat-community
+bash deploy_ubuntu.sh
+```
+
+在 `root` 下运行时，脚本会提示是否创建一个部署用户（默认 `DecFR`），并可以选择是否复制 `/root/.ssh/authorized_keys` 到新用户以便密钥登录；创建完成后脚本可以自动切换为该用户并继续执行（也可使用 `--no-resume` 禁止自动切换）。
+
+**参数 / 环境变量**
+- `DEPLOY_USER`：通过环境变量或脚本第一个参数指定部署用户名（默认 `DecFR`）。
+- `--deploy-user=<name>`：在命令行中指定用户名。
+- `--yes` / `-y`：自动确认所有提示（包括 `chown -R`），危险操作仅在你确认路径安全时使用。
+- `--no-resume`：创建用户但不自动以新用户继续执行脚本，便于手动验证。
+
+示例：
+
+```bash
+# 指定用户名并自动确认（危险，慎用）
+DEPLOY_USER=deployer bash deploy_ubuntu.sh --yes
+
+# 创建用户但不自动继续
+bash deploy_ubuntu.sh --no-resume
+```
+
+**安全提示（重要）**
+- 脚本会在对目录执行 `chown -R` 前做安全检查：若检测到脚本路径为 `/`、`/etc`、`/var`、`/usr`、`/bin`、`/sbin`、`/root`、`/proc`、`/sys`、`/dev` 等敏感路径，脚本将拒绝自动 chown 并提示手动处理。
+- 请在使用 `--yes` 前确认 `SCRIPTPATH`（即脚本运行目录）是仓库目录，避免错误修改系统文件属主。
+- 在禁用 root SSH 登录或修改 SSHD 配置前，请先确认部署用户能够通过 SSH 使用密钥登录并具有 `sudo` 权限。
+
+如需更详细的部署步骤或将部署流程加入 CI，我可以帮你生成 `docs/DEPLOY.md` 或一个非交互的一键部署命令。
+
+
 ## 📁 项目结构
 
 ```
