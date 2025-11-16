@@ -109,6 +109,15 @@ echo "安装依赖..."
 pnpm install
 
 # 3. 环境变量配置
+if [ -f packages/api/.env ]; then
+  # 检查 ENCRYPTION_KEY 格式是否正确，不正确则自动修复
+  OLD_KEY=$(grep '^ENCRYPTION_KEY=' packages/api/.env | cut -d'=' -f2)
+  if ! echo "$OLD_KEY" | grep -Eq '^[0-9a-fA-F]{64}$'; then
+    echo "检测到 ENCRYPTION_KEY 格式错误，自动修复..."
+    NEW_KEY=$(openssl rand -hex 32)
+    sed -i "s/^ENCRYPTION_KEY=.*/ENCRYPTION_KEY=$NEW_KEY/" packages/api/.env
+  fi
+fi
 if [ ! -f packages/api/.env ]; then
   echo "自动生成生产环境 .env 文件..."
   DB_PASS=$(openssl rand -base64 16 | tr -dc 'a-zA-Z0-9' | head -c 16)
