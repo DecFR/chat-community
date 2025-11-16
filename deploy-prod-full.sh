@@ -36,7 +36,7 @@ if [ "$EUID" -eq 0 ]; then
   SUDO=""
   echo "[提示] 当前以 root 用户运行，所有命令无需 sudo。建议后续使用专用服务用户（如 chat-svc）部署，提高安全性。"
 else
-  SUDO="sudo"
+  SUDO="sudo -E"
   echo "[提示] 当前以普通用户运行，部分命令将自动加 sudo。推荐使用 chat-svc 等专用服务用户部署，避免直接用 root。"
 fi
 
