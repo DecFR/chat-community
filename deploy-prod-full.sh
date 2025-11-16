@@ -1,4 +1,24 @@
 #!/bin/bash
+# 自动检测 root 并创建自定义服务用户，配置免密 sudo
+if [ "$EUID" -eq 0 ]; then
+  echo "检测到当前为 root 用户，推荐使用专用服务用户部署。"
+  read -p "请输入要创建的服务用户名（如 chat-svc）: " SVC_USER
+  if [ -z "$SVC_USER" ]; then
+    SVC_USER="chat-svc"
+    echo "未输入，默认使用 chat-svc。"
+  fi
+  if ! id "$SVC_USER" &>/dev/null; then
+    adduser --system --group "$SVC_USER"
+    echo "$SVC_USER ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$SVC_USER
+    chmod 440 /etc/sudoers.d/$SVC_USER
+    echo "已创建服务用户 $SVC_USER 并配置免密 sudo。"
+  else
+    echo "服务用户 $SVC_USER 已存在，跳过创建。"
+  fi
+  echo "请用如下命令切换到服务用户并重新运行本脚本："
+  echo "sudo -iu $SVC_USER"
+  exit 0
+fi
 # Chat Community 完整自动化生产部署脚本
 # 适用于 Ubuntu 24.04 LTS，自动安装 Node.js、pnpm、PostgreSQL、nginx、pm2
 
