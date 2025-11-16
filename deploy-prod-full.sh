@@ -54,9 +54,76 @@ $SUDO find /var/log/nginx -type f -mtime +30 -exec rm -f {} \; 2>/dev/null || tr
 PG_BACKUP=backup_$(date +%Y%m%d_%H%M%S).sql
 $SUDO -u postgres pg_dump chat_community > /tmp/$PG_BACKUP 2>/dev/null && echo "数据库已备份到 /tmp/$PG_BACKUP" || echo "数据库备份失败，跳过。"
 
+# 3. 环境变量配置
+if [ -f packages/api/.env ]; then
+  # 先赋予读写权限，防止 grep/sed 权限报错
+  $SUDO chmod 600 packages/api/.env 2>/dev/null || true
+  # 检查 ENCRYPTION_KEY 格式是否正确，不正确则自动修复
+  OLD_KEY=$(grep '^ENCRYPTION_KEY=' packages/api/.env | cut -d'=' -f2)
+  if ! echo "$OLD_KEY" | grep -Eq '^[0-9a-fA-F]{64}$'; then
+    echo "检测到 ENCRYPTION_KEY 格式错误，自动修复..."
+    $SUDO chmod 600 packages/api/.env 2>/dev/null || true
+    NEW_KEY=$(openssl rand -hex 32)
+    $SUDO sed -i "s/^ENCRYPTION_KEY=.*/ENCRYPTION_KEY=$NEW_KEY/" packages/api/.env
+  fi
+fi
+if [ ! -f packages/api/.env ]; then
+  echo "自动生成生产环境 .env 文件..."
+  DB_PASS=$(openssl rand -base64 16 | tr -dc 'a-zA-Z0-9' | head -c 16)
+  JWT_SECRET=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 32)
+  ENC_KEY=$(openssl rand -hex 32)
+  $SUDO tee packages/api/.env > /dev/null <<EOF
+DATABASE_URL="postgresql://postgres:$DB_PASS@localhost:5432/chat_community?schema=public"
+JWT_SECRET="$JWT_SECRET"
+ENCRYPTION_KEY="$ENC_KEY"
+PORT=3000
+NODE_ENV=production
+UPLOAD_DIR=./uploads
+MAX_FILE_SIZE=104857600
+AVATAR_MAX_FILE_SIZE=31457280
+EOF
+  $SUDO chmod 600 packages/api/.env 2>/dev/null || true
+  echo "已自动生成 packages/api/.env，数据库密码已自动设置。"
+fi
+# 无论 .env 是新生成还是已存在，统一自动同步数据库密码
+if [ -f packages/api/.env ]; then
+  $SUDO chmod 600 packages/api/.env 2>/dev/null || true
+  # 检查 PostgreSQL 是否已安装
+  if command -v psql >/dev/null 2>&1; then
+    # 确保 PostgreSQL 服务正在运行
+    if ! $SUDO systemctl is-active --quiet postgresql; then
+      echo "PostgreSQL 服务未运行，正在启动..."
+      $SUDO systemctl start postgresql
+    fi
+    DB_URL=$(grep '^DATABASE_URL=' packages/api/.env | cut -d'=' -f2 | tr -d '"')
+    DB_PASS=$(echo "$DB_URL" | sed -n 's|postgresql://postgres:\([^@]*\)@.*|\1|p')
+    if [ -n "$DB_PASS" ]; then
+      echo "同步数据库密码..."
+      $SUDO -u postgres psql -c "ALTER USER postgres WITH PASSWORD '$DB_PASS';" || echo "数据库密码同步失败，请检查 PostgreSQL 状态。"
+    fi
+  else
+    echo "PostgreSQL 未安装，跳过数据库密码同步。"
+  fi
+fi
+if [ ! -f packages/client/.env ]; then
+  echo "自动生成前端 .env 文件..."
+  SERVER_IP=$(hostname -I | awk '{print $1}')
+  if [ -z "$SERVER_IP" ]; then
+    echo "未能自动检测服务器 IP，请手动填写 VITE_API_URL。"
+    SERVER_IP="127.0.0.1"
+  fi
+  $SUDO tee packages/client/.env > /dev/null <<EOF
+VITE_API_URL=http://$SERVER_IP:3000/api
+VITE_SOCKET_URL=http://$SERVER_IP:3000
+EOF
+  echo "已自动生成 packages/client/.env，API 地址为 http://$SERVER_IP:3000/api。"
+fi
+
 # 自动执行 Prisma 数据库迁移（如有）
 cd packages/api
 if [ -d "prisma/migrations" ]; then
+  echo "生成 Prisma 客户端..."
+  pnpm prisma generate
   echo "执行数据库迁移..."
   pnpm prisma migrate deploy || echo "数据库迁移失败，请检查。"
 fi
@@ -212,71 +279,6 @@ fi
 # 2. 安装依赖
 echo "安装依赖..."
 $SUDO pnpm install
-
-# 3. 环境变量配置
-if [ -f packages/api/.env ]; then
-  # 先赋予读写权限，防止 grep/sed 权限报错
-  $SUDO chmod 600 packages/api/.env 2>/dev/null || true
-  # 检查 ENCRYPTION_KEY 格式是否正确，不正确则自动修复
-  OLD_KEY=$(grep '^ENCRYPTION_KEY=' packages/api/.env | cut -d'=' -f2)
-  if ! echo "$OLD_KEY" | grep -Eq '^[0-9a-fA-F]{64}$'; then
-    echo "检测到 ENCRYPTION_KEY 格式错误，自动修复..."
-    $SUDO chmod 600 packages/api/.env 2>/dev/null || true
-    NEW_KEY=$(openssl rand -hex 32)
-    $SUDO sed -i "s/^ENCRYPTION_KEY=.*/ENCRYPTION_KEY=$NEW_KEY/" packages/api/.env
-  fi
-fi
-if [ ! -f packages/api/.env ]; then
-  echo "自动生成生产环境 .env 文件..."
-  DB_PASS=$(openssl rand -base64 16 | tr -dc 'a-zA-Z0-9' | head -c 16)
-  JWT_SECRET=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 32)
-  ENC_KEY=$(openssl rand -hex 32)
-  $SUDO tee packages/api/.env > /dev/null <<EOF
-DATABASE_URL="postgresql://postgres:$DB_PASS@localhost:5432/chat_community?schema=public"
-JWT_SECRET="$JWT_SECRET"
-ENCRYPTION_KEY="$ENC_KEY"
-PORT=3000
-NODE_ENV=production
-UPLOAD_DIR=./uploads
-MAX_FILE_SIZE=104857600
-AVATAR_MAX_FILE_SIZE=31457280
-EOF
-  $SUDO chmod 600 packages/api/.env 2>/dev/null || true
-  echo "已自动生成 packages/api/.env，数据库密码已自动设置。"
-fi
-# 无论 .env 是新生成还是已存在，统一自动同步数据库密码
-if [ -f packages/api/.env ]; then
-  $SUDO chmod 600 packages/api/.env 2>/dev/null || true
-  # 检查 PostgreSQL 是否已安装
-  if command -v psql >/dev/null 2>&1; then
-    # 确保 PostgreSQL 服务正在运行
-    if ! $SUDO systemctl is-active --quiet postgresql; then
-      echo "PostgreSQL 服务未运行，正在启动..."
-      $SUDO systemctl start postgresql
-    fi
-    DB_URL=$(grep '^DATABASE_URL=' packages/api/.env | cut -d'=' -f2 | tr -d '"')
-    DB_PASS=$(echo "$DB_URL" | sed -n 's|postgresql://postgres:\([^@]*\)@.*|\1|p')
-    if [ -n "$DB_PASS" ]; then
-      echo "同步数据库密码..."
-      $SUDO -u postgres psql -c "ALTER USER postgres WITH PASSWORD '$DB_PASS';" || echo "数据库密码同步失败，请检查 PostgreSQL 状态。"
-    fi
-  else
-    echo "PostgreSQL 未安装，跳过数据库密码同步。"
-  fi
-fi
-if [ ! -f packages/client/.env ]; then
-  echo "自动生成前端 .env 文件..."
-  SERVER_IP=$(hostname -I | awk '{print $1}')
-  if [ -z "$SERVER_IP" ]; then
-    echo "未能自动检测服务器 IP，请手动填写 VITE_API_URL。"
-    SERVER_IP="127.0.0.1"
-  fi
-  $SUDO tee packages/client/.env > /dev/null <<EOF
-VITE_API_URL=http://$SERVER_IP:3000/api
-VITE_SOCKET_URL=http://$SERVER_IP:3000
-EOF
-  echo "已自动生成 packages/client/.env，API 地址为 http://$SERVER_IP:3000/api。"
-fi
 
 # 4. 初始化数据库（首次部署需执行）
 if command -v psql >/dev/null 2>&1; then
