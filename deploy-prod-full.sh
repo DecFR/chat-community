@@ -2,6 +2,11 @@
 # Chat Community 完整自动化生产部署脚本
 # 适用于 Ubuntu 24.04 LTS，自动安装 Node.js、pnpm、PostgreSQL、nginx、pm2
 
+echo "自动关闭旧服务..."
+pm2 stop chat-api || true
+pm2 delete chat-api || true
+sudo systemctl stop nginx || true
+
 set -e
 
 # 0. 环境依赖自动安装
@@ -113,7 +118,7 @@ pnpm build
 # 6. 启动后端服务（使用 pm2 管理）
 echo "启动后端服务..."
 cd packages/api
-pm2 start dist/server.js --name chat-api --update-env
+pm2 restart chat-api || pm2 start dist/server.js --name chat-api --update-env
 cd ../client
 
 # 7. 构建前端后，将 dist 目录交由 nginx 托管
