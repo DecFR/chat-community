@@ -43,8 +43,8 @@ const upload = multer({
   storage,
   fileFilter,
   limits: {
-    // 头像限制最大为 20MiB
-    fileSize: 20 * 1024 * 1024,
+    // 头像限制最大为 30MiB
+    fileSize: 30 * 1024 * 1024,
   },
 });
 

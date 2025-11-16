@@ -557,6 +557,12 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
       if (pendingFiles.length > 0) {
         attachments = [];
         for (const f of pendingFiles) {
+          // 附件最大 100MB
+          const maxSize = 100 * 1024 * 1024;
+          if (f.size > maxSize) {
+            alert(`文件过大！文件大小为 ${(f.size / 1024 / 1024).toFixed(2)} MB，最大允许 100 MB`);
+            continue;
+          }
           const fd = new FormData();
           fd.append('file', f);
           const resp = await messageAPI.uploadAttachment(fd);

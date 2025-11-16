@@ -153,11 +153,11 @@ export default function UserSettingsModal({
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      // 检查文件大小（20MB = 20 * 1024 * 1024 bytes）
-      const maxSize = 20 * 1024 * 1024;
+      // 检查文件大小（30MB = 30 * 1024 * 1024 bytes）
+      const maxSize = 30 * 1024 * 1024;
       if (file.size > maxSize) {
         setToast({ 
-          message: `图片过大！文件大小为 ${(file.size / 1024 / 1024).toFixed(2)} MB，最大允许 20 MB`, 
+          message: `图片过大！文件大小为 ${(file.size / 1024 / 1024).toFixed(2)} MB，最大允许 30 MB`, 
           type: 'error' 
         });
         // 重置input
