@@ -19,46 +19,102 @@ read -p "Domain for site (leave empty to skip nginx/certbot): " DOMAIN
 
 # 如果以 root 运行，提示可自动创建一个带 sudo 权限的普通用户并复制 SSH 公钥。
 # 脚本默认不推荐以 root 直接运行；创建用户后会自动切换为该用户并继续执行脚本。
-NEW_USER="DecFR"
+# 参数化部署用户与选项
+# 支持：环境变量 DEPLOY_USER 或脚本第一个参数
+DEPLOY_USER="${DEPLOY_USER:-${1:-DecFR}}"
+# 支持 --yes / --no-resume 作为简单标记（在 env 或命令行传入）
+FORCE_CHOWN=0
+NO_RESUME=0
+for ARG in "$@"; do
+  case "$ARG" in
+    --yes|-y) FORCE_CHOWN=1 ;;
+    --no-resume) NO_RESUME=1 ;;
+    --deploy-user=*) DEPLOY_USER="${ARG#--deploy-user=}" ;;
+  esac
+done
+
 SCRIPTPATH="$(pwd)"
+
+is_unsafe_path() {
+  # 拒绝对根或关键系统目录执行递归 chown
+  case "$1" in
+    /|/etc|/var|/usr|/bin|/sbin|/root|/proc|/sys|/dev) return 0 ;;
+    /etc/*|/var/*|/usr/*|/bin/*|/sbin/*|/root/*|/proc/*|/sys/*|/dev/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 if [ "$EUID" -eq 0 ]; then
-  echo "检测到以 root 身份运行脚本。脚本建议使用非 root 用户运行（带 sudo 权限）。"
-  read -p "是否创建用户 '$NEW_USER' 并配置 sudo 与 SSH 公钥，然后以该用户继续执行脚本？ (Y/n): " CREATE_USER
+  echo "检测到以 root 身份运行脚本。建议使用非 root 用户运行（带 sudo 权限）。"
+  read -p "是否创建用户 '$DEPLOY_USER' 并配置 sudo 与 SSH 公钥，然后以该用户继续执行脚本？ (Y/n): " CREATE_USER
   CREATE_USER=${CREATE_USER:-Y}
   if [ "$CREATE_USER" = "Y" ] || [ "$CREATE_USER" = "y" ]; then
-    if id -u "$NEW_USER" >/dev/null 2>&1; then
-      echo "用户 '$NEW_USER' 已存在。跳过创建步骤。"
+    if id -u "$DEPLOY_USER" >/dev/null 2>&1; then
+      echo "用户 '$DEPLOY_USER' 已存在，跳过创建。"
     else
-      echo "正在创建用户 '$NEW_USER'..."
-      if ! useradd -m -s /bin/bash "$NEW_USER" >/dev/null 2>&1; then
+      echo "正在创建用户 '$DEPLOY_USER'..."
+      if ! useradd -m -s /bin/bash "$DEPLOY_USER" >/dev/null 2>&1; then
         echo "useradd 失败，尝试使用 adduser 备选方式..."
-        adduser --disabled-password --gecos "" "$NEW_USER" || true
+        adduser --disabled-password --gecos "" "$DEPLOY_USER" || true
       fi
-      passwd -d "$NEW_USER" >/dev/null 2>&1 || true
-      usermod -aG sudo "$NEW_USER" || true
+      passwd -d "$DEPLOY_USER" >/dev/null 2>&1 || true
+      usermod -aG sudo "$DEPLOY_USER" || true
 
-      SSH_DIR="/home/$NEW_USER/.ssh"
+      SSH_DIR="/home/$DEPLOY_USER/.ssh"
       mkdir -p "$SSH_DIR"
-      chown "$NEW_USER":"$NEW_USER" "$SSH_DIR"
+      chown "$DEPLOY_USER":"$DEPLOY_USER" "$SSH_DIR"
       chmod 700 "$SSH_DIR"
       if [ -f /root/.ssh/authorized_keys ]; then
-        cp /root/.ssh/authorized_keys "$SSH_DIR/authorized_keys"
-        chown "$NEW_USER":"$NEW_USER" "$SSH_DIR/authorized_keys"
-        chmod 600 "$SSH_DIR/authorized_keys"
-        echo "已复制 root 的 SSH 公钥到 $SSH_DIR/authorized_keys"
+        read -p "检测到 /root/.ssh/authorized_keys，是否复制到 $SSH_DIR/authorized_keys ? (y/N): " COPY_KEYS
+        COPY_KEYS=${COPY_KEYS:-N}
+        if [ "$COPY_KEYS" = "Y" ] || [ "$COPY_KEYS" = "y" ] || [ "$FORCE_CHOWN" -eq 1 ]; then
+          cp /root/.ssh/authorized_keys "$SSH_DIR/authorized_keys"
+          chown "$DEPLOY_USER":"$DEPLOY_USER" "$SSH_DIR/authorized_keys"
+          chmod 600 "$SSH_DIR/authorized_keys"
+          echo "已复制 root 的 SSH 公钥到 $SSH_DIR/authorized_keys"
+        else
+          echo "跳过复制 authorized_keys，请手动将公钥追加到 $SSH_DIR/authorized_keys"
+        fi
       else
         echo "未找到 /root/.ssh/authorized_keys；请手动将公钥追加到 $SSH_DIR/authorized_keys"
       fi
     fi
 
-    echo "确保脚本目录 $SCRIPTPATH 对新用户可读写（将 chown 给 $NEW_USER）..."
-    chown -R "$NEW_USER":"$NEW_USER" "$SCRIPTPATH" || true
+    # 在对目录执行 chown -R 前做安全检查
+    if is_unsafe_path "$SCRIPTPATH"; then
+      echo "警告：脚本目录 '$SCRIPTPATH' 被视为敏感路径，脚本不会自动执行 chown -R。"
+      echo "请手动确认并更改属主，例如： sudo chown -R $DEPLOY_USER:$DEPLOY_USER $SCRIPTPATH"
+      if [ "$NO_RESUME" -eq 1 ]; then
+        echo "已设置 --no-resume，退出。"
+        exit 0
+      fi
+    else
+      if [ "$FORCE_CHOWN" -ne 1 ]; then
+        read -p "将把目录 '$SCRIPTPATH' 递归 chown 给 $DEPLOY_USER，这会修改目录内所有文件所有者。确认继续？ (y/N): " CONFIRM_CHOWN
+        CONFIRM_CHOWN=${CONFIRM_CHOWN:-N}
+      else
+        CONFIRM_CHOWN=Y
+      fi
 
-    echo "现在以用户 '$NEW_USER' 继续执行脚本（会在子进程中运行）。"
-    su - "$NEW_USER" -c "cd '$SCRIPTPATH' && bash deploy_ubuntu.sh"
-    EXIT_CODE=$?
-    echo "以 $NEW_USER 运行后退出，返回码: $EXIT_CODE"
-    exit $EXIT_CODE
+      if [ "$CONFIRM_CHOWN" = "Y" ] || [ "$CONFIRM_CHOWN" = "y" ]; then
+        echo "执行: chown -R $DEPLOY_USER:$DEPLOY_USER $SCRIPTPATH"
+        chown -R "$DEPLOY_USER":"$DEPLOY_USER" "$SCRIPTPATH" || true
+      else
+        echo "已选择不更改目录属主。若需要请手动执行 chown 后以 $DEPLOY_USER 运行脚本。"
+        if [ "$NO_RESUME" -eq 1 ]; then
+          echo "已设置 --no-resume，退出。"
+          exit 0
+        fi
+      fi
+    fi
+
+    if [ "$NO_RESUME" -eq 1 ]; then
+      echo "已选择 --no-resume，用户已创建，退出。请以 $DEPLOY_USER 登录并继续部署。"
+      exit 0
+    fi
+
+    echo "现在以用户 '$DEPLOY_USER' 继续执行脚本（会在登录 shell 中运行）。"
+    exec su - "$DEPLOY_USER" -c "cd '$SCRIPTPATH' && bash deploy_ubuntu.sh"
   else
     echo "未创建用户，退出。请以非 root 用户运行此脚本。"
     exit 1
