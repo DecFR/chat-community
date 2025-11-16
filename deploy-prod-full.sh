@@ -146,7 +146,7 @@ if [ -d "$FRONTEND_DIST_PATH" ]; then
     KEY_MSG="已设置密钥路径为 $SSL_KEY_PATH。"
   fi
   echo "生成 nginx 配置..."
-  cat <<EOF > $NGINX_CONF_PATH
+  cat > $NGINX_CONF_PATH <<EOF
 # HTTP (端口 80) 流量将被永久重定向到 HTTPS
 server {
   listen 80;
@@ -181,21 +181,21 @@ server {
   # API 代理
   location /api/ {
     proxy_pass http://localhost:3000/api/;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
   }
 
   # WebSocket 支持
   location /socket.io/ {
     proxy_pass http://localhost:3000/socket.io/;
-    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Upgrade \$http_upgrade;
     proxy_set_header Connection "upgrade";
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
   }
 }
 EOF
