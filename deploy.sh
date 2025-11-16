@@ -118,23 +118,39 @@ function ensure_pnpm_corepack() {
     echo "pnpm 已存在"
     return 0
   fi
+
   if command -v corepack >/dev/null 2>&1; then
     echo "启用 corepack 并激活 pnpm"
+    # 尝试启用 corepack，并激活 pnpm；若因旧的 /usr/bin/pnpm 冲突导致失败，尝试修复并重试
     $SUDO corepack enable || true
-    $SUDO corepack prepare pnpm@latest --activate || true
+    if ! $SUDO corepack prepare pnpm@latest --activate >/dev/null 2>&1; then
+      echo "corepack prepare 失败，尝试移除已存在的 /usr/bin/pnpm 并重试..."
+      if [ -e "/usr/bin/pnpm" ]; then
+        $SUDO rm -f /usr/bin/pnpm || true
+        echo "/usr/bin/pnpm 已移除，重试 corepack prepare"
+        $SUDO corepack prepare pnpm@latest --activate || true
+      fi
+    fi
   else
     echo "尝试通过 npm 全局安装 pnpm"
     if command -v npm >/dev/null 2>&1; then
-      $SUDO npm i -g pnpm
+      $SUDO npm i -g pnpm || true
     else
       echo "未检测到 npm，请先安装 Node.js 或手动安装 pnpm。"
     fi
   fi
+
   if command -v pnpm >/dev/null 2>&1; then
     echo "pnpm 安装完成"
-  else
-    echo "pnpm 安装失败，请手动确认。"
+    return 0
   fi
+
+  # 最后兜底：如果 corepack/全局安装都没有成功，提示用户手动修复并给出建议命令
+  echo "pnpm 未能通过 corepack 或 npm 自动安装。请手动检查并执行下列命令之一："
+  echo "  sudo rm -f /usr/bin/pnpm" 
+  echo "  sudo corepack enable && sudo corepack prepare pnpm@latest --activate"
+  echo "或（如有 npm 且允许全局安装）： sudo npm i -g pnpm"
+  echo "如果问题仍然存在，请手动修复文件系统权限或旧链接，然后重试。"
 }
 
 function check_build_artifacts() {
