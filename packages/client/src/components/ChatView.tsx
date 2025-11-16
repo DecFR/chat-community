@@ -1,3 +1,13 @@
+  // 状态点颜色变量
+  let statusColor = 'bg-gray-500';
+  if (isDM && currentFriend) {
+    if (currentFriend.status === 'ONLINE') statusColor = 'bg-green-500';
+    else if (currentFriend.status === 'IDLE') statusColor = 'bg-yellow-500';
+    else if (currentFriend.status === 'DO_NOT_DISTURB') statusColor = 'bg-red-500';
+  }
+  const statusDot = isDM && currentFriend ? (
+    <div className={`w-2 h-2 rounded-full ${statusColor}`}></div>
+  ) : null;
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { useServerStore } from '../stores/serverStore';
@@ -9,7 +19,8 @@ import { UserAvatar } from './UserAvatar';
 import { useUnreadStore } from '../stores/unreadStore';
 import TypingIndicator from './TypingIndicator';
 import { uploadFileInChunks } from '../lib/chunkUploader';
-import Toast from './Toast';
+import Toasts from './Toasts';
+import { useToastStore } from '../stores/toastStore';
 
 interface Message {
   id: string;
@@ -39,6 +50,21 @@ interface ChatViewProps {
 }
 
 export default function ChatView({ isDM = false }: ChatViewProps) {
+    // ...existing code...
+    // 状态点颜色变量
+    let statusColor = 'bg-gray-500';
+    if (isDM && friendId) {
+      const friend = friends.find(f => f.id === friendId);
+      if (friend) {
+        if (friend.status === 'ONLINE') statusColor = 'bg-green-500';
+        else if (friend.status === 'IDLE') statusColor = 'bg-yellow-500';
+        else if (friend.status === 'DO_NOT_DISTURB') statusColor = 'bg-red-500';
+      }
+    }
+    const statusDot = isDM && currentFriend ? (
+      <div className={`w-2 h-2 rounded-full ${statusColor}`}></div>
+    ) : null;
+    const inputClass = `flex-1 px-2 py-3 bg-transparent text-white placeholder-gray-500 focus:outline-none${rateLimitWaitMs > 0 ? ' opacity-60 cursor-not-allowed' : ''}`;
   const { channelId, friendId } = useParams();
   const { servers, currentChannelId, selectChannel, isLoading: isLoadingServers } = useServerStore();
   const { friends } = useFriendStore();
@@ -61,30 +87,6 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
   // 获取当前好友信息（如果是私聊模式）
   const currentFriend = isDM && friendId ? friends.find(f => f.id === friendId) : null;
 
-  // 获取当前频道信息
-  const currentChannel = !isDM && channelId ? 
-    servers.flatMap(s => s.channels).find(c => c.id === channelId) : null;
-
-  // 同步URL参数和store状态
-  useEffect(() => {
-    if (!isDM && channelId) {
-      // 确保 store 中的 currentChannelId 与 URL 同步
-      if (channelId !== currentChannelId) {
-        selectChannel(channelId);
-      }
-    }
-  }, [isDM, channelId, currentChannelId, selectChannel]);
-
-  // 进入/离开频道房间（用于 typing 等）
-  useEffect(() => {
-    if (!isDM) {
-      const sock = socketService.getSocket();
-      const prev = prevChannelRef.current;
-      if (prev && prev !== channelId) {
-        sock?.emit('leaveChannel', { channelId: prev });
-      }
-      if (channelId) {
-        sock?.emit('joinChannel', { channelId });
         prevChannelRef.current = channelId;
       }
       return () => {
@@ -120,7 +122,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
   const rateLimitTimerRef = useRef<number | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [uploadFileName, setUploadFileName] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const toastStore = useToastStore();
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -568,7 +570,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
           // 附件最大 100MB
           const maxSize = 100 * 1024 * 1024;
           if (f.size > maxSize) {
-            setToast({ message: `文件过大！文件大小为 ${(f.size / 1024 / 1024).toFixed(2)} MB，最大允许 100 MB`, type: 'error' });
+            toastStore.addToast({ message: `文件过大！文件大小为 ${(f.size / 1024 / 1024).toFixed(2)} MB， type: 'error' });
             continue;
           }
           setUploadFileName(f.name);
@@ -577,12 +579,12 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
             file: f,
             chunkSize: 5 * 1024 * 1024,
             onProgress: (percent) => setUploadProgress(percent),
-            onError: (err) => setToast({ message: '分片上传失败: ' + err.message, type: 'error' }),
+            onError: (err) => toastStore.addToast({ message: '分片上传失败: ' + err.message, type: 'error' }),
             onComplete: (url) => {
-              attachments.push({ url, type: 'FILE', filename: f.name, mimeType: f.type, size: f.size });
+              (attachments ?? []).push({ url, type: 'FILE', filename: f.name, mimeType: f.type, size: f.size });
               setUploadProgress(null);
               setUploadFileName(null);
-              setToast({ message: '文件上传成功', type: 'success' });
+              toastStore.addToast({ message: '文件上传成功', type: 'success' });
             },
           });
         }
@@ -636,17 +638,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
                 size="sm"
               />
               <span className="text-white font-semibold">{currentFriend.username}</span>
-              <div
-                className={`w-2 h-2 rounded-full ${
-                  currentFriend.status === 'ONLINE'
-                    ? 'bg-green-500'
-                    : currentFriend.status === 'IDLE'
-                    ? 'bg-yellow-500'
-                    : currentFriend.status === 'DO_NOT_DISTURB'
-                    ? 'bg-red-500'
-                    : 'bg-gray-500'
-                }`}
-              />
+              {statusDot}
             </>
           ) : (
             <>
@@ -807,7 +799,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
                 }
               }}
               placeholder="发送消息..."
-              className={`flex-1 px-2 py-3 bg-transparent text-white placeholder-gray-500 focus:outline-none ${rateLimitWaitMs>0?'opacity-60 cursor-not-allowed':''}`}
+              className={inputClass}
               disabled={rateLimitWaitMs > 0}
             />
             {rateLimitWaitMs > 0 && (
@@ -820,14 +812,12 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
           {/* 上传进度条与文件名 */}
           {uploadProgress !== null && uploadFileName && (
             <div className="w-full bg-gray-700 h-2 mt-2 relative">
-              <div className="bg-blue-500 h-2" style={{ width: `${uploadProgress}%` }} />
+              <div className="bg-blue-500 h-2" style={{ width: `${uploadProgress}%` }}></div>
               <span className="absolute left-2 top-[-20px] text-xs text-white">{uploadFileName} {uploadProgress}%</span>
             </div>
           )}
           {/* Toast 弹窗统一提示 */}
-          {toast && (
-            <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />
-          )}
+          <Toasts />
         </form>
       </div>
     </div>
