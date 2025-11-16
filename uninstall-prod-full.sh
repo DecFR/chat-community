@@ -5,7 +5,7 @@
 set -e
 
 read -p "确定要卸载所有服务并删除所有数据吗？(yes/no): " CONFIRM
-if [ "$CONFIRM" != "yes" ]; then
+if [[ ! "$CONFIRM" =~ ^([Yy][Ee][Ss]|[Yy])$ ]]; then
   echo "已取消卸载。"
   exit 0
 fi
