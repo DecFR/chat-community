@@ -30,8 +30,20 @@ for ARG in "$@"; do
     --yes|-y) FORCE_CHOWN=1 ;;
     --no-resume) NO_RESUME=1 ;;
     --deploy-user=*) DEPLOY_USER="${ARG#--deploy-user=}" ;;
+    --install-db) INSTALL_DB=1 ;;
+    --db-type=*) DB_TYPE="${ARG#--db-type=}" ;;
+    --db-name=*) DB_NAME="${ARG#--db-name=}" ;;
+    --db-user=*) DB_USER="${ARG#--db-user=}" ;;
+    --db-pass=*) DB_PASS="${ARG#--db-pass=}" ;;
   esac
 done
+
+# 默认数据库安装选项与凭据（可由命令行 override）
+INSTALL_DB=${INSTALL_DB:-0}
+DB_TYPE=${DB_TYPE:-postgres}
+DB_NAME=${DB_NAME:-chatdb}
+DB_USER=${DB_USER:-chatuser}
+DB_PASS=${DB_PASS:-}
 
 SCRIPTPATH="$(pwd)"
 
@@ -176,6 +188,73 @@ if [ ! -f packages/api/.env ]; then
 else
   echo "检测到 packages/api/.env 已存在，跳过复制。"
 fi
+
+echo "准备数据库连接测试（在继续其他环境配置前）"
+# 如果需要，先在本机安装并初始化 PostgreSQL
+DB_URL_LINE=$(grep -E '^DATABASE_URL=' packages/api/.env || true)
+if [ "$INSTALL_DB" -eq 1 ] || [ -z "$DB_URL_LINE" ]; then
+  read -p "是否在本机安装并初始化 PostgreSQL 数据库以供项目使用？ (y/N): " INSTALL_DB_ANSWER
+  INSTALL_DB_ANSWER=${INSTALL_DB_ANSWER:-N}
+  if [ "$INSTALL_DB_ANSWER" = "y" ] || [ "$INSTALL_DB_ANSWER" = "Y" ] || [ "$INSTALL_DB" -eq 1 ]; then
+    echo "将安装 PostgreSQL 并创建数据库/用户： name=${DB_NAME} user=${DB_USER}"
+    sudo apt update
+    sudo apt install -y postgresql postgresql-contrib
+    sudo systemctl enable --now postgresql || true
+
+    if [ -z "$DB_PASS" ]; then
+      echo "未提供数据库密码，生成随机密码..."
+      DB_PASS=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 16 || echo "changeme123")
+    fi
+
+    echo "创建 PostgreSQL 用户与数据库（若已存在会忽略错误）"
+    sudo -u postgres psql -c "DO \\$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${DB_USER}') THEN CREATE ROLE ${DB_USER} WITH LOGIN PASSWORD '${DB_PASS}'; END IF; END \\$\$;" || true
+    sudo -u postgres psql -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};" || true
+
+    DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@127.0.0.1:5432/${DB_NAME}?schema=public"
+    if grep -q '^DATABASE_URL=' packages/api/.env; then
+      # 使用 awk 安全替换，避免 URL 中的分隔符与 sed 冲突
+      awk -v val="DATABASE_URL=\"${DATABASE_URL}\"" '!/^DATABASE_URL=/{print} END{print val}' packages/api/.env > packages/api/.env.tmp && mv packages/api/.env.tmp packages/api/.env
+    else
+      echo "DATABASE_URL=\"${DATABASE_URL}\"" >> packages/api/.env
+    fi
+    echo "已写入 packages/api/.env: DATABASE_URL 指向本机 Postgres（请妥善保存数据库密码）。"
+  fi
+fi
+
+cd packages/api
+echo "将在 packages/api 中安装依赖以便测试数据库连接（使用 pnpm）"
+pnpm install --frozen-lockfile || pnpm install || true
+
+TEST_DB_OK=0
+while [ "$TEST_DB_OK" -ne 1 ]; do
+  echo "尝试使用 Prisma 测试 DATABASE_URL（pnpm prisma db pull）..."
+  if pnpm prisma db pull >/dev/null 2>&1; then
+    echo "数据库连接测试成功。"
+    TEST_DB_OK=1
+    break
+  else
+    echo "数据库连接测试失败。可能是 DATABASE_URL 未设置或无法连通。"
+    echo "选择： (r) 重试  (e) 编辑 packages/api/.env  (s) 跳过测试并继续"
+    read -p "请输入 r/e/s: " CHOICE
+    CHOICE=${CHOICE:-r}
+    case "$CHOICE" in
+      r|R)
+        echo "重试数据库连接测试..." ;;
+      e|E)
+        echo "请编辑 packages/api/.env（例如使用 nano 或你的编辑器），保存后按回车继续。"
+        read -r
+        ;;
+      s|S)
+        echo "已选择跳过数据库测试，继续后续步骤（注意：可能导致迁移/运行失败）。"
+        break
+        ;;
+      *)
+        echo "未知选项，默认重试。" ;;
+    esac
+  fi
+done
+
+cd "$WORKDIR"
 
 echo "安装依赖（pnpm）并构建项目..."
 
