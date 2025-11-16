@@ -200,12 +200,14 @@ $SUDO pnpm install
 
 # 3. 环境变量配置
 if [ -f packages/api/.env ]; then
+  # 先赋予读写权限，防止 grep/sed 权限报错
+  $SUDO chmod 600 packages/api/.env 2>/dev/null || true
   # 检查 ENCRYPTION_KEY 格式是否正确，不正确则自动修复
   OLD_KEY=$(grep '^ENCRYPTION_KEY=' packages/api/.env | cut -d'=' -f2)
   if ! echo "$OLD_KEY" | grep -Eq '^[0-9a-fA-F]{64}$'; then
     echo "检测到 ENCRYPTION_KEY 格式错误，自动修复..."
     NEW_KEY=$(openssl rand -hex 32)
-    sed -i "s/^ENCRYPTION_KEY=.*/ENCRYPTION_KEY=$NEW_KEY/" packages/api/.env
+    $SUDO sed -i "s/^ENCRYPTION_KEY=.*/ENCRYPTION_KEY=$NEW_KEY/" packages/api/.env
   fi
 fi
 if [ ! -f packages/api/.env ]; then
