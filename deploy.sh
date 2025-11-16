@@ -401,25 +401,46 @@ function setup_postgres_db_and_user() {
     $SUDO systemctl enable --now postgresql || $SUDO systemctl enable --now postgresql-18 || true
   fi
 
+  # 封装对 postgres 的 psql 调用：兼容有 sudo 的环境与无 sudo（使用 su - postgres）
+  function psql_query() {
+    # 返回查询结果（-tAc）
+    local sql="$1"
+    if [ -n "${SUDO:-}" ]; then
+      $SUDO -u postgres psql -v ON_ERROR_STOP=1 -tAc "$sql"
+    else
+      # 在没有 sudo 的环境下，尝试使用 su - postgres -c
+      su - postgres -c "psql -v ON_ERROR_STOP=1 -tAc \"$sql\"" 2>/dev/null || psql -v ON_ERROR_STOP=1 -tAc "$sql" 2>/dev/null || echo ""
+    fi
+  }
+
+  function psql_exec() {
+    # 运行 psql -c 并返回退出码
+    local sql="$1"
+    if [ -n "${SUDO:-}" ]; then
+      $SUDO -u postgres psql -v ON_ERROR_STOP=1 -c "$sql"
+    else
+      su - postgres -c "psql -v ON_ERROR_STOP=1 -c \"$sql\"" 2>/dev/null || psql -v ON_ERROR_STOP=1 -c "$sql"
+    fi
+  }
+
   # 创建角色
-  sudo_cmd="$SUDO -u postgres psql -v ON_ERROR_STOP=1 -tAc"
-  exists=$($SUDO -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='$PG_USER'" || echo "")
+  exists=$(psql_query "SELECT 1 FROM pg_roles WHERE rolname='$PG_USER'" || echo "")
   if [ "x$exists" = "x1" ]; then
     echo "角色 $PG_USER 已存在，尝试更新密码。"
-    $SUDO -u postgres psql -c "ALTER ROLE \"$PG_USER\" WITH LOGIN PASSWORD '$PG_PASSWORD';" || fail "无法更新角色密码"
+    psql_exec "ALTER ROLE \"$PG_USER\" WITH LOGIN PASSWORD '$PG_PASSWORD';" || fail "无法更新角色密码"
   else
     echo "创建角色 $PG_USER"
-    $SUDO -u postgres psql -c "CREATE ROLE \"$PG_USER\" WITH LOGIN PASSWORD '$PG_PASSWORD';" || fail "无法创建角色"
+    psql_exec "CREATE ROLE \"$PG_USER\" WITH LOGIN PASSWORD '$PG_PASSWORD';" || fail "无法创建角色"
   fi
 
   # 创建数据库并设置拥有者
-  db_exists=$($SUDO -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='$PG_DB'" || echo "")
+  db_exists=$(psql_query "SELECT 1 FROM pg_database WHERE datname='$PG_DB'" || echo "")
   if [ "x$db_exists" = "x1" ]; then
     echo "数据库 $PG_DB 已存在，确保拥有者为 $PG_USER"
-    $SUDO -u postgres psql -c "ALTER DATABASE \"$PG_DB\" OWNER TO \"$PG_USER\";" || true
+    psql_exec "ALTER DATABASE \"$PG_DB\" OWNER TO \"$PG_USER\";" || true
   else
     echo "创建数据库 $PG_DB"
-    $SUDO -u postgres psql -c "CREATE DATABASE \"$PG_DB\" OWNER \"$PG_USER\";" || fail "无法创建数据库"
+    psql_exec "CREATE DATABASE \"$PG_DB\" OWNER \"$PG_USER\";" || fail "无法创建数据库"
   fi
 }
 
