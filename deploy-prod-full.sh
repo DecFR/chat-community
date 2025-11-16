@@ -88,10 +88,16 @@ set -e
 
 # 检查并卸载已安装 Node.js
 if command -v node >/dev/null 2>&1; then
-  echo "检测到已安装 Node.js，自动卸载..."
-  $SUDO apt-get remove -y nodejs npm || true
-  $SUDO apt-get purge -y nodejs npm || true
-  $SUDO rm -rf /usr/local/lib/node_modules /usr/lib/node_modules /usr/local/bin/node /usr/bin/node /usr/local/bin/npm /usr/bin/npm
+  echo "检测到已安装 Node.js。是否卸载并重新安装？(y/N)"
+  read -r CONFIRM_NODE
+  if [[ "$CONFIRM_NODE" =~ ^[Yy]$ ]]; then
+    echo "正在卸载 Node.js..."
+    $SUDO apt-get remove -y nodejs npm || true
+    $SUDO apt-get purge -y nodejs npm || true
+    $SUDO rm -rf /usr/local/lib/node_modules /usr/lib/node_modules /usr/local/bin/node /usr/bin/node /usr/local/bin/npm /usr/bin/npm
+  else
+    echo "跳过 Node.js 卸载。"
+  fi
 fi
 echo "安装 Node.js 最新 LTS (22.x)..."
 curl -fsSL https://deb.nodesource.com/setup_22.x | $SUDO -E bash -
@@ -101,9 +107,15 @@ $SUDO apt-get install -y nodejs
 
 # 检查并卸载已安装 pnpm
 if command -v pnpm >/dev/null 2>&1; then
-  echo "检测到已安装 pnpm，自动卸载..."
-  $SUDO npm uninstall -g pnpm || true
-  $SUDO rm -rf /usr/local/bin/pnpm /usr/bin/pnpm
+  echo "检测到已安装 pnpm。是否卸载并重新安装？(y/N)"
+  read -r CONFIRM_PNPM
+  if [[ "$CONFIRM_PNPM" =~ ^[Yy]$ ]]; then
+    echo "正在卸载 pnpm..."
+    $SUDO npm uninstall -g pnpm || true
+    $SUDO rm -rf /usr/local/bin/pnpm /usr/bin/pnpm
+  else
+    echo "跳过 pnpm 卸载。"
+  fi
 fi
 echo "安装 pnpm 最新 LTS (9.x)..."
 $SUDO npm install -g pnpm@latest
@@ -112,11 +124,17 @@ $SUDO npm install -g pnpm@latest
 
 # 检查并卸载已安装 PostgreSQL
 if command -v psql >/dev/null 2>&1; then
-  echo "检测到已安装 PostgreSQL，自动卸载..."
-  $SUDO systemctl stop postgresql || true
-  $SUDO apt-get remove -y postgresql* || true
-  $SUDO apt-get purge -y postgresql* || true
-  $SUDO rm -rf /var/lib/postgresql /etc/postgresql /etc/postgresql-common /usr/lib/postgresql /usr/share/postgresql /var/log/postgresql
+  echo "检测到已安装 PostgreSQL。是否卸载并重新安装？(y/N)"
+  read -r CONFIRM_PG
+  if [[ "$CONFIRM_PG" =~ ^[Yy]$ ]]; then
+    echo "正在卸载 PostgreSQL..."
+    $SUDO systemctl stop postgresql || true
+    $SUDO apt-get remove -y postgresql* || true
+    $SUDO apt-get purge -y postgresql* || true
+    $SUDO rm -rf /var/lib/postgresql /etc/postgresql /etc/postgresql-common /usr/lib/postgresql /usr/share/postgresql /var/log/postgresql
+  else
+    echo "跳过 PostgreSQL 卸载。"
+  fi
 fi
 echo "安装 PostgreSQL 最新版 (18.x)..."
 $SUDO apt-get update
@@ -135,11 +153,17 @@ $SUDO systemctl start postgresql
 
 # 检查并卸载已安装 nginx
 if command -v nginx >/dev/null 2>&1; then
-  echo "检测到已安装 nginx，自动卸载..."
-  $SUDO systemctl stop nginx || true
-  $SUDO apt-get remove -y nginx* || true
-  $SUDO apt-get purge -y nginx* || true
-  $SUDO rm -rf /etc/nginx /var/log/nginx /var/www/html
+  echo "检测到已安装 nginx。是否卸载并重新安装？(y/N)"
+  read -r CONFIRM_NGINX
+  if [[ "$CONFIRM_NGINX" =~ ^[Yy]$ ]]; then
+    echo "正在卸载 nginx..."
+    $SUDO systemctl stop nginx || true
+    $SUDO apt-get remove -y nginx* || true
+    $SUDO apt-get purge -y nginx* || true
+    $SUDO rm -rf /etc/nginx /var/log/nginx /var/www/html
+  else
+    echo "跳过 nginx 卸载。"
+  fi
 fi
 echo "安装 nginx 最新稳定版 (1.26.x)..."
 $SUDO apt-get install -y nginx
@@ -150,10 +174,16 @@ $SUDO systemctl start nginx
 
 # 检查并卸载已安装 pm2
 if command -v pm2 >/dev/null 2>&1; then
-  echo "检测到已安装 pm2，自动卸载..."
-  $SUDO pm2 kill || true
-  $SUDO npm uninstall -g pm2 || true
-  $SUDO rm -rf /usr/local/bin/pm2 /usr/bin/pm2 ~/.pm2
+  echo "检测到已安装 pm2。是否卸载并重新安装？(y/N)"
+  read -r CONFIRM_PM2
+  if [[ "$CONFIRM_PM2" =~ ^[Yy]$ ]]; then
+    echo "正在卸载 pm2..."
+    $SUDO pm2 kill || true
+    $SUDO npm uninstall -g pm2 || true
+    $SUDO rm -rf /usr/local/bin/pm2 /usr/bin/pm2 ~/.pm2
+  else
+    echo "跳过 pm2 卸载。"
+  fi
 fi
 echo "安装 pm2 最新 LTS (5.x)..."
 $SUDO npm install -g pm2@latest
