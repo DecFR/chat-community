@@ -87,6 +87,15 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
   // 获取当前好友信息（如果是私聊模式）
   const currentFriend = isDM && friendId ? friends.find(f => f.id === friendId) : null;
 
+  useEffect(() => {
+    if (!isDM) {
+      const sock = socketService.getSocket();
+      const prev = prevChannelRef.current;
+      if (prev && prev !== channelId) {
+        sock?.emit('leaveChannel', { channelId: prev });
+      }
+      if (channelId) {
+        sock?.emit('joinChannel', { channelId });
         prevChannelRef.current = channelId;
       }
       return () => {
