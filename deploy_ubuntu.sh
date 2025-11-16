@@ -230,7 +230,7 @@ if [ "$SHOULD_INSTALL_DB" -eq 1 ]; then
   fi
 
   echo "创建 PostgreSQL 用户与数据库（若已存在会忽略错误）"
-  sudo -u postgres psql -c "DO \\$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${DB_USER}') THEN CREATE ROLE ${DB_USER} WITH LOGIN PASSWORD '${DB_PASS}'; END IF; END \\$\$;" || true
+  sudo -u postgres psql -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${DB_USER}') THEN CREATE ROLE ${DB_USER} WITH LOGIN PASSWORD '${DB_PASS}'; END IF; END \$\$;" || true
   sudo -u postgres psql -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};" || true
 
   DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@127.0.0.1:5432/${DB_NAME}?schema=public"
@@ -251,16 +251,17 @@ TEST_DB_OK=0
 while [ "$TEST_DB_OK" -ne 1 ]; do
   echo "尝试使用 Prisma 测试 DATABASE_URL（pnpm prisma db pull）..."
   # Ensure Prisma sees DATABASE_URL: use env var if set, otherwise rely on files
-  if [ -n "${DATABASE_URL:-}" ]; then
+    if [ -n "${DATABASE_URL:-}" ]; then
     # Exported earlier when created non-interactively
     export DATABASE_URL
   else
     # Try load from files into environment for the command
-    if [ -f packages/api/.env ]; then
-      # shellcheck disable=SC1090
-      set -o allexport; source packages/api/.env 2>/dev/null || true; set +o allexport
-    elif [ -f packages/api/.env.local ]; then
-      set -o allexport; source packages/api/.env.local 2>/dev/null || true; set +o allexport
+      if [ -f "$WORKDIR/packages/api/.env" ]; then
+        # shellcheck disable=SC1090
+        set -o allexport; source "$WORKDIR/packages/api/.env" 2>/dev/null || true; set +o allexport
+      elif [ -f "$WORKDIR/packages/api/.env.local" ]; then
+        set -o allexport; source "$WORKDIR/packages/api/.env.local" 2>/dev/null || true; set +o allexport
+      fi
     fi
   fi
 
@@ -292,12 +293,12 @@ while [ "$TEST_DB_OK" -ne 1 ]; do
           DB_PASS=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 16 || echo "changeme123")
         fi
 
-        sudo -u postgres psql -c "DO \\$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${DB_USER}') THEN CREATE ROLE ${DB_USER} WITH LOGIN PASSWORD '${DB_PASS}'; END IF; END \\$\$;" || true
+            sudo -u postgres psql -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${DB_USER}') THEN CREATE ROLE ${DB_USER} WITH LOGIN PASSWORD '${DB_PASS}'; END IF; END \$\$;" || true
         sudo -u postgres psql -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};" || true
 
         DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@127.0.0.1:5432/${DB_NAME}?schema=public"
-        echo "DATABASE_URL=\"${DATABASE_URL}\"" > packages/api/.env.local
-        chmod 600 packages/api/.env.local || true
+        echo "DATABASE_URL=\"${DATABASE_URL}\"" > "$WORKDIR/packages/api/.env.local"
+        chmod 600 "$WORKDIR/packages/api/.env.local" || true
         export DATABASE_URL="${DATABASE_URL}"
         echo "已在本机安装并写入 packages/api/.env.local（权限 600），并为当前进程导出 DATABASE_URL。"
         echo "正在重试数据库连接测试..."
