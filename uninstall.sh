@@ -51,6 +51,14 @@ if command -v nginx >/dev/null 2>&1; then
   $SUDO systemctl reload nginx || true
 fi
 
+
+# 移除监控定时器与脚本（如果存在）
+echo "Removing monitor systemd timer and script (if exists)..."
+$SUDO systemctl disable --now chat-community-monitor.timer chat-community-monitor.service 2>/dev/null || true
+$SUDO rm -f /etc/systemd/system/chat-community-monitor.timer /etc/systemd/system/chat-community-monitor.service || true
+$SUDO systemctl daemon-reload || true
+$SUDO rm -f /opt/chat-community/bin/monitor.sh || true
+
 echo "Optionally remove system user 'chatcomm'."
 read -r -p "Remove user chatcomm? [y/N]: " resp2 || true
 resp2=${resp2:-N}

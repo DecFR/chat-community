@@ -252,6 +252,41 @@ echo "生产依赖安装完成。"
 SH
   chmod +x "$DEPLOY_DIR/install_prod_deps.sh"
 
+  # 将监控脚本与 systemd 单元加入发布包（若仓库中存在 monitor.sh，则包含）
+  if [ -f "$ROOT_DIR/monitor.sh" ]; then
+    cp "$ROOT_DIR/monitor.sh" "$DEPLOY_DIR/monitor.sh"
+    chmod +x "$DEPLOY_DIR/monitor.sh"
+
+    # 生成 systemd unit 与 timer 模板（与 monitor.sh 协同）
+    cat > "$DEPLOY_DIR/chat-community-monitor.service" <<'UNIT'
+[Unit]
+Description=Chat-Community Health Check
+After=network.target
+
+[Service]
+Type=simple
+User=chatcomm
+ExecStart=/opt/chat-community/bin/monitor.sh check
+Nice=10
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+    cat > "$DEPLOY_DIR/chat-community-monitor.timer" <<'TIMER'
+[Unit]
+Description=Run Chat-Community health check every 5 minutes
+
+[Timer]
+OnBootSec=2m
+OnUnitActiveSec=5min
+Unit=chat-community-monitor.service
+
+[Install]
+WantedBy=timers.target
+TIMER
+  fi
+
   # 生成运行脚本示例
   cat > "$DEPLOY_DIR/run_api.sh" <<'SH'
 #!/usr/bin/env bash
@@ -467,10 +502,34 @@ function install_nginx_and_config() {
     cp -r "$CLIENT_PKG/dist/"* "$SITE_ROOT/"
   fi
 
-  # 支持通过环境变量指定域名与证书路径
+  # 支持通过环境变量指定域名与证书路径；若未提供，则交互式询问以启用 HTTPS
   NGINX_DOMAIN=${NGINX_DOMAIN:-}
   SSL_CERT=${SSL_CERT:-}
   SSL_KEY=${SSL_KEY:-}
+
+  # 交互式：若未提前设置域名，则询问用户（留空表示跳过 HTTPS 自动配置）
+  if [ -z "${NGINX_DOMAIN:-}" ]; then
+    read -r -p "请输入要为 nginx 配置的域名（留空以跳过 HTTPS 自动配置）：" user_domain || true
+    if [ -n "$user_domain" ]; then
+      NGINX_DOMAIN="$user_domain"
+    fi
+  fi
+
+  # 如果提供了域名但未提供证书路径，则询问证书路径（用户可留空以跳过 HTTPS）
+  if [ -n "${NGINX_DOMAIN:-}" ]; then
+    if [ -z "${SSL_CERT:-}" ]; then
+      read -r -p "请输入 SSL 证书路径（PEM），例如 /etc/ssl/certs/your.pem（留空以跳过 HTTPS）：" user_cert || true
+      if [ -n "$user_cert" ]; then
+        SSL_CERT="$user_cert"
+      fi
+    fi
+    if [ -z "${SSL_KEY:-}" ] && [ -n "${SSL_CERT:-}" ]; then
+      read -r -p "请输入 SSL 私钥路径，例如 /etc/ssl/private/your.key：" user_key || true
+      if [ -n "$user_key" ]; then
+        SSL_KEY="$user_key"
+      fi
+    fi
+  fi
   PROXY_PORT=${PROXY_PORT:-3000}
 
   NGINX_HTTP_CONF="/etc/nginx/sites-available/chat-community"
@@ -508,8 +567,8 @@ EOF
     $SUDO ln -s "$NGINX_HTTP_CONF" "$NGINX_HTTP_LINK" || true
   fi
 
-  # 如果提供了域名与证书路径，则生成 HTTPS 配置和 80->443 重定向
-  if [ -n "$NGINX_DOMAIN" ] && [ -n "$SSL_CERT" ] && [ -n "$SSL_KEY" ] && [ -f "$SSL_CERT" ] && [ -f "$SSL_KEY" ]; then
+  # 如果提供了域名与证书路径且证书文件存在，则生成 HTTPS 配置和 80->443 重定向
+  if [ -n "${NGINX_DOMAIN:-}" ] && [ -n "${SSL_CERT:-}" ] && [ -n "${SSL_KEY:-}" ] && [ -f "$SSL_CERT" ] && [ -f "$SSL_KEY" ]; then
     echo "检测到域名与证书，生成 HTTPS 配置并启用 80->443 重定向"
     NGINX_SSL_CONF="/etc/nginx/sites-available/chat-community-ssl"
     NGINX_SSL_LINK="/etc/nginx/sites-enabled/chat-community-ssl"
@@ -614,10 +673,19 @@ EX
     $SUDO mv /tmp/chat-community-ssl.example "$EXAMPLE_PATH"
     echo "未检测到完整证书路径，已生成示例配置： $EXAMPLE_PATH"
     echo "如要启用 HTTPS：编辑该文件，替换域名与证书路径，然后移动到 /etc/nginx/sites-available/chat-community-ssl 并在 sites-enabled 建立符号链接。"
+    if [ -n "${NGINX_DOMAIN:-}" ]; then
+      echo "提示：你输入了域名但缺少有效证书路径，若你已有证书，可用下面命令启用 HTTPS（替换路径）："
+      echo "  sudo mv /etc/nginx/sites-available/chat-community-ssl.example /etc/nginx/sites-available/chat-community-ssl"
+      echo "  sudo ln -s /etc/nginx/sites-available/chat-community-ssl /etc/nginx/sites-enabled/chat-community-ssl || true"
+      echo "  sudo nginx -t && sudo systemctl restart nginx"
+    fi
   fi
 
   $SUDO nginx -t || true
   $SUDO systemctl enable --now nginx || true
+  echo "若需手动修改 nginx 配置：编辑 /etc/nginx/sites-available/chat-community 和（如存在）/etc/nginx/sites-available/chat-community-ssl，然后运行："
+  echo "  sudo nginx -t"
+  echo "  sudo systemctl restart nginx"
 }
 
 # 将发布包部署到 /opt/chat-community，并设置 systemd 服务
@@ -643,6 +711,20 @@ function deploy_to_system() {
   if [ -f "$DEPLOY_DIR/install_prod_deps.sh" ]; then
     $SUDO cp "$DEPLOY_DIR/install_prod_deps.sh" "$DEST_ROOT/"
     $SUDO chmod 755 "$DEST_ROOT/install_prod_deps.sh" || true
+  fi
+  # 安装监控脚本与 systemd 单元（如果发布包包含）
+  if [ -f "$DEPLOY_DIR/monitor.sh" ]; then
+    echo "部署监控脚本到 $DEST_ROOT/bin"
+    $SUDO mkdir -p "$DEST_ROOT/bin"
+    $SUDO cp "$DEPLOY_DIR/monitor.sh" "$DEST_ROOT/bin/monitor.sh"
+    $SUDO chmod +x "$DEST_ROOT/bin/monitor.sh" || true
+  fi
+  if [ -f "$DEPLOY_DIR/chat-community-monitor.service" ] && [ -f "$DEPLOY_DIR/chat-community-monitor.timer" ]; then
+    echo "安装并启用监控 systemd 单元/定时器"
+    $SUDO mv "$DEPLOY_DIR/chat-community-monitor.service" /etc/systemd/system/chat-community-monitor.service || true
+    $SUDO mv "$DEPLOY_DIR/chat-community-monitor.timer" /etc/systemd/system/chat-community-monitor.timer || true
+    $SUDO systemctl daemon-reload || true
+    $SUDO systemctl enable --now chat-community-monitor.timer || true
   fi
   if [ -f "$DEPLOY_DIR/run_api.sh" ]; then
     $SUDO cp "$DEPLOY_DIR/run_api.sh" "$DEST_ROOT/"
