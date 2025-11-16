@@ -35,6 +35,8 @@ for ARG in "$@"; do
     --db-name=*) DB_NAME="${ARG#--db-name=}" ;;
     --db-user=*) DB_USER="${ARG#--db-user=}" ;;
     --db-pass=*) DB_PASS="${ARG#--db-pass=}" ;;
+    --force-install-db) FORCE_INSTALL_DB=1 ;;
+    --non-interactive) NON_INTERACTIVE=1 ;;
   esac
 done
 
@@ -44,6 +46,19 @@ DB_TYPE=${DB_TYPE:-postgres}
 DB_NAME=${DB_NAME:-chatdb}
 DB_USER=${DB_USER:-chatuser}
 DB_PASS=${DB_PASS:-}
+FORCE_INSTALL_DB=${FORCE_INSTALL_DB:-0}
+NON_INTERACTIVE=${NON_INTERACTIVE:-0}
+
+get_database_url() {
+  # Prefer packages/api/.env, then .env.local, then environment
+  if [ -f packages/api/.env ]; then
+    grep -E '^DATABASE_URL=' packages/api/.env | sed 's/^DATABASE_URL=//' | tr -d '\"' || true
+  elif [ -f packages/api/.env.local ]; then
+    grep -E '^DATABASE_URL=' packages/api/.env.local | sed 's/^DATABASE_URL=//' | tr -d '\"' || true
+  else
+    echo "${DATABASE_URL:-}"
+  fi
+}
 
 SCRIPTPATH="$(pwd)"
 
@@ -191,34 +206,41 @@ fi
 
 echo "准备数据库连接测试（在继续其他环境配置前）"
 # 如果需要，先在本机安装并初始化 PostgreSQL
-DB_URL_LINE=$(grep -E '^DATABASE_URL=' packages/api/.env || true)
-if [ "$INSTALL_DB" -eq 1 ] || [ -z "$DB_URL_LINE" ]; then
-  read -p "是否在本机安装并初始化 PostgreSQL 数据库以供项目使用？ (y/N): " INSTALL_DB_ANSWER
-  INSTALL_DB_ANSWER=${INSTALL_DB_ANSWER:-N}
-  if [ "$INSTALL_DB_ANSWER" = "y" ] || [ "$INSTALL_DB_ANSWER" = "Y" ] || [ "$INSTALL_DB" -eq 1 ]; then
-    echo "将安装 PostgreSQL 并创建数据库/用户： name=${DB_NAME} user=${DB_USER}"
-    sudo apt update
-    sudo apt install -y postgresql postgresql-contrib
-    sudo systemctl enable --now postgresql || true
+DB_URL_LINE=$(get_database_url)
 
-    if [ -z "$DB_PASS" ]; then
-      echo "未提供数据库密码，生成随机密码..."
-      DB_PASS=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 16 || echo "changeme123")
-    fi
+# Decide whether to install DB non-interactively
+SHOULD_INSTALL_DB=0
+if [ "$FORCE_INSTALL_DB" -eq 1 ]; then
+  SHOULD_INSTALL_DB=1
+elif [ "$INSTALL_DB" -eq 1 ]; then
+  SHOULD_INSTALL_DB=1
+elif [ "$NON_INTERACTIVE" -eq 1 ] && [ -z "$DB_URL_LINE" ]; then
+  SHOULD_INSTALL_DB=1
+fi
 
-    echo "创建 PostgreSQL 用户与数据库（若已存在会忽略错误）"
-    sudo -u postgres psql -c "DO \\$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${DB_USER}') THEN CREATE ROLE ${DB_USER} WITH LOGIN PASSWORD '${DB_PASS}'; END IF; END \\$\$;" || true
-    sudo -u postgres psql -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};" || true
+if [ "$SHOULD_INSTALL_DB" -eq 1 ]; then
+  echo "（自动模式）将安装 PostgreSQL 并创建数据库/用户： name=${DB_NAME} user=${DB_USER}"
+  sudo apt update
+  sudo apt install -y postgresql postgresql-contrib
+  sudo systemctl enable --now postgresql || true
 
-    DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@127.0.0.1:5432/${DB_NAME}?schema=public"
-    if grep -q '^DATABASE_URL=' packages/api/.env; then
-      # 使用 awk 安全替换，避免 URL 中的分隔符与 sed 冲突
-      awk -v val="DATABASE_URL=\"${DATABASE_URL}\"" '!/^DATABASE_URL=/{print} END{print val}' packages/api/.env > packages/api/.env.tmp && mv packages/api/.env.tmp packages/api/.env
-    else
-      echo "DATABASE_URL=\"${DATABASE_URL}\"" >> packages/api/.env
-    fi
-    echo "已写入 packages/api/.env: DATABASE_URL 指向本机 Postgres（请妥善保存数据库密码）。"
+  if [ -z "$DB_PASS" ]; then
+    echo "未提供数据库密码，生成随机密码..."
+    DB_PASS=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 16 || echo "changeme123")
   fi
+
+  echo "创建 PostgreSQL 用户与数据库（若已存在会忽略错误）"
+  sudo -u postgres psql -c "DO \\$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${DB_USER}') THEN CREATE ROLE ${DB_USER} WITH LOGIN PASSWORD '${DB_PASS}'; END IF; END \\$\$;" || true
+  sudo -u postgres psql -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};" || true
+
+  DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@127.0.0.1:5432/${DB_NAME}?schema=public"
+  # 写入 .env.local（避免误提交），并导出以供后续命令使用
+  echo "DATABASE_URL=\"${DATABASE_URL}\"" > packages/api/.env.local
+  chmod 600 packages/api/.env.local || true
+  export DATABASE_URL="${DATABASE_URL}"
+  echo "已写入 packages/api/.env.local（权限 600），并为当前进程导出 DATABASE_URL。请不要将 .env.local 提交到仓库。"
+else
+  echo "跳过自动安装 Postgres（可交互式方式或使用 --force-install-db/--install-db 标志）。"
 fi
 
 cd packages/api
@@ -228,22 +250,57 @@ pnpm install --frozen-lockfile || pnpm install || true
 TEST_DB_OK=0
 while [ "$TEST_DB_OK" -ne 1 ]; do
   echo "尝试使用 Prisma 测试 DATABASE_URL（pnpm prisma db pull）..."
+  # Ensure Prisma sees DATABASE_URL: use env var if set, otherwise rely on files
+  if [ -n "${DATABASE_URL:-}" ]; then
+    # Exported earlier when created non-interactively
+    export DATABASE_URL
+  else
+    # Try load from files into environment for the command
+    if [ -f packages/api/.env ]; then
+      # shellcheck disable=SC1090
+      set -o allexport; source packages/api/.env 2>/dev/null || true; set +o allexport
+    elif [ -f packages/api/.env.local ]; then
+      set -o allexport; source packages/api/.env.local 2>/dev/null || true; set +o allexport
+    fi
+  fi
+
   if pnpm prisma db pull >/dev/null 2>&1; then
     echo "数据库连接测试成功。"
     TEST_DB_OK=1
     break
   else
-    echo "数据库连接测试失败。可能是 DATABASE_URL 未设置或无法连通。"
-    echo "选择： (r) 重试  (e) 编辑 packages/api/.env  (s) 跳过测试并继续"
-    read -p "请输入 r/e/s: " CHOICE
+      echo "数据库连接测试失败。可能是 DATABASE_URL 未设置或无法连通。"
+      echo "选择： (r) 重试  (e) 编辑 packages/api/.env  (i) 在本机安装 Postgres 并初始化  (s) 跳过测试并继续"
+      read -p "请输入 r/e/i/s: " CHOICE
     CHOICE=${CHOICE:-r}
     case "$CHOICE" in
       r|R)
         echo "重试数据库连接测试..." ;;
       e|E)
         echo "请编辑 packages/api/.env（例如使用 nano 或你的编辑器），保存后按回车继续。"
-        read -r
-        ;;
+        i|I)
+          echo "将安装并初始化本机 PostgreSQL（name=${DB_NAME} user=${DB_USER}）..."
+          sudo apt update
+          sudo apt install -y postgresql postgresql-contrib
+          sudo systemctl enable --now postgresql || true
+
+          if [ -z "$DB_PASS" ]; then
+            echo "未提供数据库密码，生成随机密码..."
+            DB_PASS=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 16 || echo "changeme123")
+          fi
+
+          sudo -u postgres psql -c "DO \\$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${DB_USER}') THEN CREATE ROLE ${DB_USER} WITH LOGIN PASSWORD '${DB_PASS}'; END IF; END \\$\$;" || true
+          sudo -u postgres psql -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};" || true
+
+          DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@127.0.0.1:5432/${DB_NAME}?schema=public"
+          echo "DATABASE_URL=\"${DATABASE_URL}\"" > packages/api/.env.local
+          chmod 600 packages/api/.env.local || true
+          export DATABASE_URL="${DATABASE_URL}"
+          echo "已在本机安装并写入 packages/api/.env.local（权限 600），并为当前进程导出 DATABASE_URL。"
+          echo "正在重试数据库连接测试..."
+          ;;
+          echo "已在本机安装并写入 packages/api/.env，正在重试数据库连接测试..."
+          ;;
       s|S)
         echo "已选择跳过数据库测试，继续后续步骤（注意：可能导致迁移/运行失败）。"
         break
