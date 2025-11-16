@@ -55,9 +55,13 @@ PG_BACKUP=backup_$(date +%Y%m%d_%H%M%S).sql
 $SUDO -u postgres pg_dump chat_community > /tmp/$PG_BACKUP 2>/dev/null && echo "数据库已备份到 /tmp/$PG_BACKUP" || echo "数据库备份失败，跳过。"
 
 # 3. 环境变量配置
+# 确保 .env 文件权限正确
+$SUDO chmod 600 packages/api/.env 2>/dev/null || true
+$SUDO chmod 600 packages/client/.env 2>/dev/null || true
 if [ -f packages/api/.env ]; then
   # 先赋予读写权限，防止 grep/sed 权限报错
   $SUDO chmod 600 packages/api/.env 2>/dev/null || true
+  $SUDO chown $USER:$USER packages/api/.env 2>/dev/null || true
   # 检查 ENCRYPTION_KEY 格式是否正确，不正确则自动修复
   OLD_KEY=$(grep '^ENCRYPTION_KEY=' packages/api/.env | cut -d'=' -f2)
   if ! echo "$OLD_KEY" | grep -Eq '^[0-9a-fA-F]{64}$'; then
@@ -83,11 +87,13 @@ MAX_FILE_SIZE=104857600
 AVATAR_MAX_FILE_SIZE=31457280
 EOF
   $SUDO chmod 600 packages/api/.env 2>/dev/null || true
+  $SUDO chown $USER:$USER packages/api/.env 2>/dev/null || true
   echo "已自动生成 packages/api/.env，数据库密码已自动设置。"
 fi
 # 无论 .env 是新生成还是已存在，统一自动同步数据库密码
 if [ -f packages/api/.env ]; then
   $SUDO chmod 600 packages/api/.env 2>/dev/null || true
+  $SUDO chown $USER:$USER packages/api/.env 2>/dev/null || true
   # 检查 PostgreSQL 是否已安装
   if command -v psql >/dev/null 2>&1; then
     # 确保 PostgreSQL 服务正在运行
@@ -116,6 +122,8 @@ if [ ! -f packages/client/.env ]; then
 VITE_API_URL=http://$SERVER_IP:3000/api
 VITE_SOCKET_URL=http://$SERVER_IP:3000
 EOF
+  $SUDO chmod 600 packages/client/.env 2>/dev/null || true
+  $SUDO chown $USER:$USER packages/client/.env 2>/dev/null || true
   echo "已自动生成 packages/client/.env，API 地址为 http://$SERVER_IP:3000/api。"
 fi
 
@@ -279,6 +287,8 @@ fi
 # 2. 安装依赖
 echo "安装依赖..."
 $SUDO pnpm install
+$SUDO chown -R $USER:$USER node_modules 2>/dev/null || true
+$SUDO chown -R $USER:$USER packages/*/node_modules 2>/dev/null || true
 
 # 4. 初始化数据库（首次部署需执行）
 if command -v psql >/dev/null 2>&1; then
