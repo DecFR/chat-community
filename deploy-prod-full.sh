@@ -25,11 +25,11 @@ find packages/api/uploads -type f -mtime +30 -exec rm -f {} \; 2>/dev/null || tr
 # 清理 pm2 日志（30 天前）
 find ~/.pm2/logs -type f -mtime +30 -exec rm -f {} \; 2>/dev/null || true
 # 清理 nginx 日志（30 天前）
-find /var/log/nginx -type f -mtime +30 -exec rm -f {} \; 2>/dev/null || true
+$SUDO find /var/log/nginx -type f -mtime +30 -exec rm -f {} \; 2>/dev/null || true
 
 # 数据库自动备份（部署前）
 PG_BACKUP=backup_$(date +%Y%m%d_%H%M%S).sql
-sudo -u postgres pg_dump chat_community > /tmp/$PG_BACKUP 2>/dev/null && echo "数据库已备份到 /tmp/$PG_BACKUP" || echo "数据库备份失败，跳过。"
+$SUDO -u postgres pg_dump chat_community > /tmp/$PG_BACKUP 2>/dev/null && echo "数据库已备份到 /tmp/$PG_BACKUP" || echo "数据库备份失败，跳过。"
 
 # 自动执行 Prisma 数据库迁移（如有）
 cd packages/api
@@ -40,21 +40,21 @@ fi
 cd ../..
 
 # 自动检测端口占用并释放（3000）
-if lsof -i:3000 | grep LISTEN; then
-  fuser -k 3000/tcp || true
+if $SUDO lsof -i:3000 | grep LISTEN; then
+  $SUDO fuser -k 3000/tcp || true
 fi
 
 # 自动检测磁盘空间
 df -h | grep -E '^/|Filesystem' || true
 
 # 自动设置 .env 文件权限
-chmod 600 packages/api/.env 2>/dev/null || true
-chmod 600 packages/client/.env 2>/dev/null || true
+$SUDO chmod 600 packages/api/.env 2>/dev/null || true
+$SUDO chmod 600 packages/client/.env 2>/dev/null || true
 
 echo "自动关闭旧服务..."
-pm2 stop chat-api || true
-pm2 delete chat-api || true
-sudo systemctl stop nginx || true
+$SUDO pm2 stop chat-api || true
+$SUDO pm2 delete chat-api || true
+$SUDO systemctl stop nginx || true
 
 set -e
 
@@ -122,7 +122,7 @@ fi
 
 # 2. 安装依赖
 echo "安装依赖..."
-pnpm install
+$SUDO pnpm install
 
 # 3. 环境变量配置
 if [ -f packages/api/.env ]; then
@@ -139,8 +139,8 @@ if [ ! -f packages/api/.env ]; then
   DB_PASS=$(openssl rand -base64 16 | tr -dc 'a-zA-Z0-9' | head -c 16)
   JWT_SECRET=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 32)
   ENC_KEY=$(openssl rand -hex 32)
-  sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD '$DB_PASS';"
-  cat > packages/api/.env <<EOF
+  $SUDO -u postgres psql -c "ALTER USER postgres WITH PASSWORD '$DB_PASS';"
+  $SUDO tee packages/api/.env > /dev/null <<EOF
 DATABASE_URL="postgresql://postgres:$DB_PASS@localhost:5432/chat_community?schema=public"
 JWT_SECRET="$JWT_SECRET"
 ENCRYPTION_KEY="$ENC_KEY"
@@ -159,7 +159,7 @@ if [ ! -f packages/client/.env ]; then
     echo "未能自动检测服务器 IP，请手动填写 VITE_API_URL。"
     SERVER_IP="127.0.0.1"
   fi
-  cat > packages/client/.env <<EOF
+  $SUDO tee packages/client/.env > /dev/null <<EOF
 VITE_API_URL=http://$SERVER_IP:3000/api
 VITE_SOCKET_URL=http://$SERVER_IP:3000
 EOF
@@ -168,16 +168,16 @@ fi
 
 # 4. 初始化数据库（首次部署需执行）
 echo "初始化数据库..."
-pnpm run setup:db
+$SUDO pnpm run setup:db
 
 # 5. 构建前后端
 echo "构建前后端..."
-pnpm build
+$SUDO pnpm build
 
 # 6. 启动后端服务（使用 pm2 管理）
 echo "启动后端服务..."
 cd packages/api
-pm2 restart chat-api || pm2 start dist/server.js --name chat-api --update-env
+$SUDO pm2 restart chat-api || $SUDO pm2 start dist/server.js --name chat-api --update-env
 cd ../client
 
 # 7. 构建前端后，将 dist 目录交由 nginx 托管
@@ -210,7 +210,7 @@ if [ -d "$FRONTEND_DIST_PATH" ]; then
     KEY_MSG="已设置密钥路径为 $SSL_KEY_PATH。"
   fi
   echo "生成 nginx 配置..."
-  cat > $NGINX_CONF_PATH <<EOF
+  $SUDO tee $NGINX_CONF_PATH > /dev/null <<EOF
 # 安全加固：添加常用安全头部
 add_header X-Frame-Options "SAMEORIGIN" always;
 add_header X-Content-Type-Options "nosniff" always;
@@ -270,9 +270,9 @@ server {
   }
 }
 EOF
-  ln -sf $NGINX_CONF_PATH /etc/nginx/sites-enabled/chat-community.conf
+  $SUDO ln -sf $NGINX_CONF_PATH /etc/nginx/sites-enabled/chat-community.conf
   echo "重载 nginx..."
-  sudo systemctl restart nginx
+  $SUDO systemctl restart nginx
   echo "$DOMAIN_MSG"
   echo "$CERT_MSG"
   echo "$KEY_MSG"
