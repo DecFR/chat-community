@@ -113,7 +113,7 @@ if [ ! -f packages/api/.env ]; then
   echo "自动生成生产环境 .env 文件..."
   DB_PASS=$(openssl rand -base64 16 | tr -dc 'a-zA-Z0-9' | head -c 16)
   JWT_SECRET=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 32)
-  ENC_KEY=$(openssl rand -hex 64)
+  ENC_KEY=$(openssl rand -hex 32)
   sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD '$DB_PASS';"
   cat > packages/api/.env <<EOF
 DATABASE_URL="postgresql://postgres:$DB_PASS@localhost:5432/chat_community?schema=public"
