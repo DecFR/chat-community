@@ -1,13 +1,5 @@
-  // 状态点颜色变量
-  let statusColor = 'bg-gray-500';
-  if (isDM && currentFriend) {
-    if (currentFriend.status === 'ONLINE') statusColor = 'bg-green-500';
-    else if (currentFriend.status === 'IDLE') statusColor = 'bg-yellow-500';
-    else if (currentFriend.status === 'DO_NOT_DISTURB') statusColor = 'bg-red-500';
-  }
-  const statusDot = isDM && currentFriend ? (
-    <div className={`w-2 h-2 rounded-full ${statusColor}`}></div>
-  ) : null;
+// 状态点颜色变量
+  // 状态点颜色变量已在下方声明并使用，无需重复声明
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { useServerStore } from '../stores/serverStore';
@@ -49,27 +41,49 @@ interface ChatViewProps {
   isDM?: boolean;
 }
 
+// 定义带 _key 的消息类型，避免 any
+interface MessageWithKey extends Message {
+  _key?: string;
+}
+
 export default function ChatView({ isDM = false }: ChatViewProps) {
-    // ...existing code...
-    // 状态点颜色变量
-    let statusColor = 'bg-gray-500';
-    if (isDM && friendId) {
-      const friend = friends.find(f => f.id === friendId);
-      if (friend) {
-        if (friend.status === 'ONLINE') statusColor = 'bg-green-500';
-        else if (friend.status === 'IDLE') statusColor = 'bg-yellow-500';
-        else if (friend.status === 'DO_NOT_DISTURB') statusColor = 'bg-red-500';
-      }
-    }
-    const statusDot = isDM && currentFriend ? (
-      <div className={`w-2 h-2 rounded-full ${statusColor}`}></div>
-    ) : null;
-    const inputClass = `flex-1 px-2 py-3 bg-transparent text-white placeholder-gray-500 focus:outline-none${rateLimitWaitMs > 0 ? ' opacity-60 cursor-not-allowed' : ''}`;
+    // 顶部唯一声明 currentFriend、rateLimitWaitMs、uploadProgress
   const { channelId, friendId } = useParams();
-  const { servers, currentChannelId, selectChannel, isLoading: isLoadingServers } = useServerStore();
+  const { servers, isLoading: isLoadingServers } = useServerStore();
   const { friends } = useFriendStore();
   const { user } = useAuthStore();
-  const { decrementDM, decrementChannel } = useUnreadStore();
+  // const { decrementDM, decrementChannel } = useUnreadStore(); // 未使用，已移除
+
+  // 统一声明
+  const [rateLimitWaitMs, setRateLimitWaitMs] = useState(0);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const currentFriend = isDM && friendId ? friends.find(f => f.id === friendId) : null;
+
+  // 获取当前频道信息（如果是频道模式）
+  let currentChannel = null;
+  if (!isDM && channelId) {
+    for (const s of servers) {
+      const found = s.channels.find(c => c.id === channelId);
+      if (found) {
+        currentChannel = found;
+        break;
+      }
+    }
+  }
+
+  // 状态点颜色变量
+  let statusColor = 'bg-gray-500';
+  if (isDM && currentFriend) {
+    if (currentFriend.status === 'ONLINE') statusColor = 'bg-green-500';
+    else if (currentFriend.status === 'IDLE') statusColor = 'bg-yellow-500';
+    else if (currentFriend.status === 'DO_NOT_DISTURB') statusColor = 'bg-red-500';
+  }
+  const statusDot = isDM && currentFriend ? (
+    <div className={`w-2 h-2 rounded-full ${statusColor}`}></div>
+  ) : null;
+
+  const progressValue = typeof uploadProgress === 'number' ? uploadProgress : 0;
+  const inputClass = `flex-1 px-2 py-3 bg-transparent text-white placeholder-gray-500 focus:outline-none${rateLimitWaitMs > 0 ? ' opacity-60 cursor-not-allowed' : ''}`;
 
   // 构建完整的媒体URL
   const getMediaUrl = (url: string | null | undefined): string => {
@@ -84,8 +98,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
     return `${baseUrl}${url}`;
   };
 
-  // 获取当前好友信息（如果是私聊模式）
-  const currentFriend = isDM && friendId ? friends.find(f => f.id === friendId) : null;
+  // 已在顶部声明，无需重复
 
   useEffect(() => {
     if (!isDM) {
@@ -127,9 +140,9 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
   // 追踪上一次加载的目标ID,防止不必要的重新加载导致消息丢失
   const lastLoadedTargetRef = useRef<string>('');
   const [isNearBottom, setIsNearBottom] = useState(true);
-  const [rateLimitWaitMs, setRateLimitWaitMs] = useState(0);
+  // 已在顶部声明，无需重复
   const rateLimitTimerRef = useRef<number | null>(null);
-  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  // uploadProgress 已在顶部声明，移除重复声明
   const [uploadFileName, setUploadFileName] = useState<string | null>(null);
   const toastStore = useToastStore();
 
@@ -174,7 +187,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
       const { clearChannel } = useUnreadStore.getState();
       clearChannel(channelId);
     }
-  }, [isDM, friendId, channelId, user, messages, dmConversationId, decrementDM, decrementChannel]);
+  }, [isDM, friendId, channelId, user, messages, dmConversationId]);
 
   // 首次加载消息
   useEffect(() => {
@@ -211,7 +224,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
             const uniqueMap = new Map<string, Message>();
             loaded.forEach((m: Message, idx) => {
               const key = m.id || `temp-${idx}-${Date.now()}-${Math.random()}`;
-              (m as any)._key = key;
+              (m as MessageWithKey)._key = key;
               uniqueMap.set(key, m);
             });
             const list = Array.from(uniqueMap.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
@@ -220,7 +233,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
 
             // 计算未读分隔线位置（如命中则在该元素后显示）
             if (savedLastRead) {
-              const idx = list.findIndex(m => m.id === savedLastRead || (m as any)._key === savedLastRead);
+              const idx = list.findIndex(m => m.id === savedLastRead || (m as MessageWithKey)._key === savedLastRead);
               setFirstUnreadIndex(idx >= 0 ? idx + 1 : null);
             }
           }
@@ -231,7 +244,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
           const uniqueMap = new Map<string, Message>();
           loaded.forEach((m: Message, idx) => {
             const key = m.id || `temp-${idx}-${Date.now()}-${Math.random()}`;
-            (m as any)._key = key;
+            (m as MessageWithKey)._key = key;
             uniqueMap.set(key, m);
           });
           const list = Array.from(uniqueMap.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
@@ -243,7 +256,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
           const serverLastRead = stateRes.data.data?.lastReadMessageId as string | undefined;
           const effectiveLastRead = savedLastRead || serverLastRead;
           if (effectiveLastRead) {
-            const idx = list.findIndex(m => m.id === effectiveLastRead || (m as any)._key === effectiveLastRead);
+            const idx = list.findIndex(m => m.id === effectiveLastRead || (m as MessageWithKey)._key === effectiveLastRead);
             setFirstUnreadIndex(idx >= 0 ? idx + 1 : null);
           }
         }
@@ -255,7 +268,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
       }
     };
     loadMessages();
-  }, [isDM, friendId, channelId, user?.id]);
+  }, [isDM, friendId, channelId, user?.id, messages.length]);
 
   // 加载更多消息(历史记录)
   const loadMoreMessages = useCallback(async () => {
@@ -298,8 +311,8 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
           const merged: Message[] = [...olderMessages, ...prev];
           const uniqueMap = new Map<string, Message>();
           merged.forEach((m: Message, idx) => {
-            const key = m.id || (m as any)._key || `temp-${idx}-${Date.now()}-${Math.random()}`;
-            (m as any)._key = key;
+            const key = m.id || (m as MessageWithKey)._key || `temp-${idx}-${Date.now()}-${Math.random()}`;
+            (m as MessageWithKey)._key = key;
             uniqueMap.set(key, m);
           });
           const unique = Array.from(uniqueMap.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
@@ -322,7 +335,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
     } finally {
       setIsLoadingMore(false);
     }
-  }, [isLoadingMore, hasMore, messages, isDM, friendId, channelId]);
+  }, [isLoadingMore, hasMore, messages, isDM, friendId, channelId, dmConversationId]);
 
   // 进入/离开私聊会话房间（用于 typing 等）
   useEffect(() => {
@@ -399,13 +412,13 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
       // 只处理频道消息，必须有 channelId 且没有 directMessageConversationId
       if (!isDM && message.channelId && !message.directMessageConversationId && message.channelId === targetId) {
         setMessages((prev) => {
-          const exists = prev.some(m => (m as any)._key ? (m as any)._key === ((message as any)._key || message.id) : m.id === message.id);
+          const exists = prev.some(m => (m as MessageWithKey)._key ? (m as MessageWithKey)._key === ((message as MessageWithKey)._key || message.id) : m.id === message.id);
           if (exists) return prev;
           const merged = [...prev, message];
           const uniq = new Map<string, Message>();
           merged.forEach((m: Message, idx) => {
-            const key = (m as any)._key || m.id || `temp-${idx}-${Date.now()}-${Math.random()}`;
-            (m as any)._key = key;
+            const key = (m as MessageWithKey)._key || m.id || `temp-${idx}-${Date.now()}-${Math.random()}`;
+            (m as MessageWithKey)._key = key;
             uniq.set(key, m);
           });
           return Array.from(uniq.values());
@@ -425,13 +438,13 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
         
         if (isMyMessage || isFriendMessage) {
           setMessages((prev) => {
-            const exists = prev.some(m => (m as any)._key ? (m as any)._key === ((message as any)._key || message.id) : m.id === message.id);
+            const exists = prev.some(m => (m as MessageWithKey)._key ? (m as MessageWithKey)._key === ((message as MessageWithKey)._key || message.id) : m.id === message.id);
             if (exists) return prev;
             const merged = [...prev, message];
             const uniq = new Map<string, Message>();
             merged.forEach((m: Message, idx) => {
-              const key = (m as any)._key || m.id || `temp-${idx}-${Date.now()}-${Math.random()}`;
-              (m as any)._key = key;
+              const key = (m as MessageWithKey)._key || m.id || `temp-${idx}-${Date.now()}-${Math.random()}`;
+              (m as MessageWithKey)._key = key;
               uniq.set(key, m);
             });
             return Array.from(uniq.values());
@@ -557,9 +570,6 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, isNearBottom]);
 
-  // 定义带 _key 的消息类型，避免 any
-  type MessageWithKey = Message & { _key?: string };
-
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (rateLimitWaitMs > 0) return; // 速率限制期间禁止发送
@@ -579,7 +589,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
           // 附件最大 100MB
           const maxSize = 100 * 1024 * 1024;
           if (f.size > maxSize) {
-            toastStore.addToast({ message: `文件过大！文件大小为 ${(f.size / 1024 / 1024).toFixed(2)} MB， type: 'error' });
+            toastStore.addToast({ message: `文件过大！文件大小为 ${(f.size / 1024 / 1024).toFixed(2)} MB`, type: 'error' });
             continue;
           }
           setUploadFileName(f.name);
@@ -696,7 +706,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
               (firstUnreadIndex !== null && index === firstUnreadIndex) ||
               (lastReadMessageId && index > 0 && messages[index - 1].id === lastReadMessageId && message.authorId !== user?.id);
 
-            const renderKey = (message as any)._key || message.id;
+            const renderKey = (message as MessageWithKey)._key || message.id;
             return (
               <div key={renderKey}>
                 {showUnreadDivider && (
@@ -821,8 +831,8 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
           {/* 上传进度条与文件名 */}
           {uploadProgress !== null && uploadFileName && (
             <div className="w-full bg-gray-700 h-2 mt-2 relative">
-              <div className="bg-blue-500 h-2" style={{ width: `${uploadProgress}%` }}></div>
-              <span className="absolute left-2 top-[-20px] text-xs text-white">{uploadFileName} {uploadProgress}%</span>
+              <div className="bg-blue-500 h-2" style={{ width: progressValue + '%' }}></div>
+              <span className="absolute left-2 top-[-20px] text-xs text-white">{uploadFileName} {progressValue}%</span>
             </div>
           )}
           {/* Toast 弹窗统一提示 */}
