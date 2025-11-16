@@ -2,6 +2,21 @@
 # Chat Community 完整自动化生产部署脚本
 # 适用于 Ubuntu 24.04 LTS，自动安装 Node.js、pnpm、PostgreSQL、nginx、pm2
 
+
+# 推荐使用专用服务用户（如 chat-svc），避免直接用 root 部署，提高安全性。
+# 创建服务用户命令： sudo adduser --system --group chat-svc
+# 部署建议：
+# 1. 推荐用 chat-svc 或类似专用用户运行本脚本，且仅赋予必要 sudo 权限（如 apt、systemctl、npm 全局安装等）。
+# 2. root 用户仅用于首次环境初始化或特殊维护。
+# 3. 普通用户运行时，脚本会自动加 sudo，确保依赖安装和服务管理无障碍。
+if [ "$EUID" -eq 0 ]; then
+  SUDO=""
+  echo "[提示] 当前以 root 用户运行，所有命令无需 sudo。建议后续使用专用服务用户（如 chat-svc）部署，提高安全性。"
+else
+  SUDO="sudo"
+  echo "[提示] 当前以普通用户运行，部分命令将自动加 sudo。推荐使用 chat-svc 等专用服务用户部署，避免直接用 root。"
+fi
+
 echo "[安全加固] 自动清理旧文件、备份数据库、设置权限..."
 # 清理前端 dist 目录（部署前，防止残留旧文件）
 rm -rf packages/client/dist/* || true
@@ -45,38 +60,38 @@ set -e
 
 # 0. 环境依赖自动安装
 
+
+# Node.js
 if ! command -v node >/dev/null 2>&1; then
   echo "安装 Node.js 最新 LTS (22.x)..."
-  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-  sudo apt-get install -y nodejs
+  curl -fsSL https://deb.nodesource.com/setup_22.x | $SUDO -E bash -
+  $SUDO apt-get install -y nodejs
 else
   echo "Node.js 已安装，跳过。"
 fi
 
 # pnpm
-
 if ! command -v pnpm >/dev/null 2>&1; then
   echo "安装 pnpm 最新 LTS (9.x)..."
-  npm install -g pnpm@latest
+  $SUDO npm install -g pnpm@latest
 else
   echo "pnpm 已安装，跳过。"
 fi
 
-
 # PostgreSQL
 if ! command -v psql >/dev/null 2>&1; then
   echo "安装 PostgreSQL 最新版 (18.x)..."
-  sudo apt-get update
-  sudo apt-get install -y wget ca-certificates
+  $SUDO apt-get update
+  $SUDO apt-get install -y wget ca-certificates
   if [ -f /etc/apt/trusted.gpg.d/postgresql.gpg ]; then
-    sudo rm -f /etc/apt/trusted.gpg.d/postgresql.gpg
+    $SUDO rm -f /etc/apt/trusted.gpg.d/postgresql.gpg
   fi
-  wget -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/postgresql.gpg
-  echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
-  sudo apt-get update
-  sudo apt-get install -y postgresql-18 postgresql-contrib
-  sudo systemctl enable postgresql
-  sudo systemctl start postgresql
+  wget -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | $SUDO gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/postgresql.gpg
+  echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" | $SUDO tee /etc/apt/sources.list.d/pgdg.list
+  $SUDO apt-get update
+  $SUDO apt-get install -y postgresql-18 postgresql-contrib
+  $SUDO systemctl enable postgresql
+  $SUDO systemctl start postgresql
 else
   echo "PostgreSQL 已安装，跳过。"
 fi
@@ -84,16 +99,17 @@ fi
 # nginx
 if ! command -v nginx >/dev/null 2>&1; then
   echo "安装 nginx 最新稳定版 (1.26.x)..."
-  sudo apt-get install -y nginx
-  sudo systemctl enable nginx
-  sudo systemctl start nginx
+  $SUDO apt-get install -y nginx
+  $SUDO systemctl enable nginx
+  $SUDO systemctl start nginx
 else
   echo "nginx 已安装，跳过。"
 fi
 
+# pm2
 if ! command -v pm2 >/dev/null 2>&1; then
   echo "安装 pm2 最新 LTS (5.x)..."
-  npm install -g pm2@latest
+  $SUDO npm install -g pm2@latest
 else
   echo "pm2 已安装，跳过。"
 fi
