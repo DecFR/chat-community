@@ -134,7 +134,7 @@ export function initializeSocket(httpServer: HttpServer) {
     });
     
     // 立即加入所有服务器房间，确保用户能接收到频道消息
-    memberships.forEach((m) => {
+    memberships.forEach((m: { serverId: string }) => {
       socket.join(`server-${m.serverId}`);
       logger.debug(`User ${socket.username} auto-joined server room: server-${m.serverId}`);
     });
@@ -215,7 +215,16 @@ export function initializeSocket(httpServer: HttpServer) {
             attachments:
               attachments && attachments.length > 0
                 ? {
-                    create: attachments.map((a) => ({
+                    create: attachments.map((a: {
+                      url: string;
+                      type: 'IMAGE' | 'VIDEO' | 'FILE';
+                      filename?: string;
+                      mimeType?: string;
+                      size?: number;
+                      width?: number;
+                      height?: number;
+                      durationMs?: number;
+                    }) => ({
                       url: a.url,
                       type: a.type,
                       filename: a.filename || '',

@@ -14,14 +14,14 @@ async function cleanupUnusedAvatarsWorker({
 }) {
   try {
     const files = await fs.readdir(uploadDir);
-    const avatarFiles = files.filter((name) => name.startsWith('avatar-'));
+    const avatarFiles = files.filter((name: string) => name.startsWith('avatar-'));
     if (avatarFiles.length === 0) return { removed: 0 };
     const users = await prisma.user.findMany({ select: { avatarUrl: true } });
     const inUse = new Set(
       users
-        .map((u) => u.avatarUrl)
+        .map((u: { avatarUrl: string | null }) => u.avatarUrl)
         .filter((u): u is string => !!u && u.startsWith('/uploads/'))
-        .map((u) => u.split('/').pop() as string)
+        .map((u: string) => u.split('/').pop() as string)
     );
     let removed = 0;
     const now = Date.now();

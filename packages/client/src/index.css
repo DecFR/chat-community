@@ -67,13 +67,6 @@
   /* 通用文本颜色覆盖 */
   body.light-theme .text-white,
   body.light-theme .text-light {
-
-  /* Simple fade-in animation for toasts */
-  @keyframes fade-in {
-    from { opacity: 0; transform: translateY(-4px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-  .animate-fade-in { animation: fade-in 150ms ease-out; }
     color: var(--text-primary) !important;
   }
   body.light-theme .text-discord-light-gray {
@@ -163,6 +156,13 @@
 }
 
 @layer components {
+/* Simple fade-in animation for toasts */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in { animation: fade-in 150ms ease-out; }
+
   .btn {
     @apply px-4 py-2 rounded-md font-medium transition-colors duration-200;
   }

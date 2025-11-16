@@ -28,5 +28,9 @@ export async function getAdminNotifications(adminId: string) {
     where: { key: { startsWith: `ADMIN_NOTIFY_${adminId}_` } },
     orderBy: { createdAt: 'desc' },
   });
-  return notifies.map((n) => ({ id: n.id, content: n.value, createdAt: n.createdAt }));
+  return notifies.map((n: { id: string; value: string; createdAt: Date }) => ({
+    id: n.id,
+    content: n.value,
+    createdAt: n.createdAt,
+  }));
 }
