@@ -279,6 +279,7 @@ while [ "$TEST_DB_OK" -ne 1 ]; do
       e|E)
         echo "请编辑 packages/api/.env（例如使用 nano 或你的编辑器），保存后按回车继续。"
         read -r
+        ;;
 
       i|I)
         echo "将安装并初始化本机 PostgreSQL（name=${DB_NAME} user=${DB_USER}）..."
