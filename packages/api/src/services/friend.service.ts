@@ -195,7 +195,13 @@ export const friendService = {
     });
 
     // 映射为好友对象
-    const friends = friendships.map((f) => {
+    const friends = friendships.map((f: {
+      id: string;
+      senderId: string;
+      receiverId: string;
+      sender: { id: string; username: string; avatarUrl?: string | null; status?: string };
+      receiver: { id: string; username: string; avatarUrl?: string | null; status?: string };
+    }) => {
       const friend = f.senderId === userId ? f.receiver : f.sender;
       return {
         friendshipId: f.id,

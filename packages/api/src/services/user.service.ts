@@ -152,7 +152,7 @@ export const userService = {
 
     if (!currentUserId || users.length === 0) return users;
 
-    const targetIds = users.map((u) => u.id);
+    const targetIds = users.map((u: { id: string }) => u.id);
     const friendships = await prisma.friendship.findMany({
       where: {
         OR: [
@@ -186,7 +186,10 @@ export const userService = {
     }
 
     // 将关系附加到返回对象
-    return users.map((u) => ({ ...u, relationship: relByUser.get(u.id) || 'NONE' }));
+    return users.map((u: { id: string; username: string; avatarUrl?: string | null; bio?: string | null; status?: string }) => ({
+      ...u,
+      relationship: relByUser.get(u.id) || 'NONE',
+    }));
   },
 
   /**

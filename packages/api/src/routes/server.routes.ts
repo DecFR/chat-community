@@ -149,7 +149,7 @@ router.get('/', async (req, res) => {
       where: { userId },
       select: { serverId: true },
     });
-    const userServerIds = userMemberships.map((m) => m.serverId);
+    const userServerIds = userMemberships.map((m: { serverId: string }) => m.serverId);
 
     // 查询所有服务器(包含owner信息用于过滤)
     const allServers = await prisma.server.findMany({
@@ -176,7 +176,7 @@ router.get('/', async (req, res) => {
     });
 
     // 过滤: 用户已加入的服务器 OR (管理员创建的公开服务器)
-    const servers = allServers.filter((server) => {
+    const servers = allServers.filter((server: any) => {
       const isUserMember = userServerIds.includes(server.id);
       const isAdminPublicServer = server.owner.role === 'ADMIN' && server.isPublic;
       return isUserMember || isAdminPublicServer;

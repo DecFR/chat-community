@@ -1,5 +1,5 @@
 import { io, Socket } from 'socket.io-client';
-import { useAuthStore } from '../stores/authStore';
+import { logoutProxy, updateUserProxy } from './authProxy';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const SOCKET_URL = API_URL.replace('/api', ''); // 移除 /api 后缀获取Socket.io服务器URL
@@ -56,29 +56,26 @@ class SocketService {
 
     // 监听强制登出事件
     this.socket.on('forceLogout', (data: { reason: string; message: string }) => {
-      console.warn('Force logout:', data);
-      
-      // 清理本地状态
-      useAuthStore.getState().logout();
-      
-      // 断开Socket连接
-      this.disconnect();
-      
-      // 显示提示消息
-      alert(data.message || '您的账号在其他设备登录，您已被强制下线');
-      
-      // 跳转到登录页
-      window.location.href = '/login';
+      try {
+        console.warn('Force logout:', data);
+        // 使用 authProxy 调用已注册的登出函数
+        logoutProxy();
+        // 断开Socket连接
+        this.disconnect();
+        // 显示提示消息并跳转到登录页
+        alert(data.message || '您的账号在其他设备登录，您已被强制下线');
+        window.location.href = '/login';
+      } catch (e) {
+        console.error('Error handling forceLogout:', e);
+      }
     });
 
     // 全局监听自身资料更新，直接写入 authStore，保证任何界面都实时更新
     this.socket.on('userProfileUpdate', (data: { userId: string; avatarUrl?: string; username?: string }) => {
-      const current = useAuthStore.getState().user;
-      if (current && current.id === data.userId) {
-        useAuthStore.getState().updateUser({
-          ...(data.avatarUrl !== undefined && { avatarUrl: data.avatarUrl }),
-          ...(data.username && { username: data.username })
-        });
+      try {
+        updateUserProxy({ ...(data.avatarUrl !== undefined && { avatarUrl: data.avatarUrl }), ...(data.username && { username: data.username }), id: data.userId });
+      } catch (e) {
+        console.error('Error handling userProfileUpdate:', e);
       }
     });
 

@@ -26,9 +26,9 @@ export async function cleanupUnusedAvatars(maxAgeOverride?: number) {
     const users = await prisma.user.findMany({ select: { avatarUrl: true } });
     const inUse = new Set(
       users
-        .map((u) => u.avatarUrl)
+        .map((u: { avatarUrl: string | null }) => u.avatarUrl)
         .filter((u): u is string => !!u && u.startsWith('/uploads/'))
-        .map((u) => u.split('/').pop() as string)
+        .map((u: string) => u.split('/').pop() as string)
     );
 
     let removed = 0;

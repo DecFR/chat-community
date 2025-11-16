@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { authAPI } from '../lib/api';
 import { socketService } from '../lib/socket';
+import { setAuthProxy } from '../lib/authProxy';
 
 interface User {
   id: string;
@@ -118,3 +119,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 }));
+
+// 注册 auth proxy 以供 socket 模块调用（避免循环依赖）
+setAuthProxy({
+  logout: () => useAuthStore.getState().logout(),
+  updateUser: (u: any) => useAuthStore.getState().updateUser(u),
+});

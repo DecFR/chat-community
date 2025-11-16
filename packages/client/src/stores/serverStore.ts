@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { serverAPI } from '../lib/api';
+import { socketService } from '../lib/socket';
 
 export interface Channel {
   id: string;
@@ -75,7 +76,6 @@ export const useServerStore = create<ServerState>((set, get) => ({
       await get().loadServers();
       
       // 创建服务器后立即加入 Socket 房间以接收实时消息
-      const { socketService } = await import('../lib/socket');
       if (newServer?.id) {
         socketService.joinServer(newServer.id);
       }

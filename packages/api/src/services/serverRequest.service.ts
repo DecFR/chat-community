@@ -86,14 +86,14 @@ export const serverRequestService = {
    * 获取待审批的申请
    */
   getPending(): ServerRequest[] {
-    return readRequests().filter((r) => r.status === 'PENDING');
+    return readRequests().filter((r: { status: string }) => r.status === 'PENDING');
   },
 
   /**
    * 获取用户的申请
    */
   getByUser(userId: string): ServerRequest[] {
-    return readRequests().filter((r) => r.requesterId === userId);
+    return readRequests().filter((r: { requesterId?: string }) => r.requesterId === userId);
   },
 
   /**
