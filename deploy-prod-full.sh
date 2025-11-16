@@ -230,7 +230,6 @@ if [ ! -f packages/api/.env ]; then
   DB_PASS=$(openssl rand -base64 16 | tr -dc 'a-zA-Z0-9' | head -c 16)
   JWT_SECRET=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 32)
   ENC_KEY=$(openssl rand -hex 32)
-  $SUDO -u postgres psql -c "ALTER USER postgres WITH PASSWORD '$DB_PASS';"
   $SUDO tee packages/api/.env > /dev/null <<EOF
 DATABASE_URL="postgresql://postgres:$DB_PASS@localhost:5432/chat_community?schema=public"
 JWT_SECRET="$JWT_SECRET"
@@ -242,6 +241,14 @@ MAX_FILE_SIZE=104857600
 AVATAR_MAX_FILE_SIZE=31457280
 EOF
   echo "已自动生成 packages/api/.env，数据库密码已自动设置。"
+fi
+# 无论 .env 是新生成还是已存在，统一自动同步数据库密码
+if [ -f packages/api/.env ]; then
+  DB_URL=$(grep '^DATABASE_URL=' packages/api/.env | cut -d'=' -f2 | tr -d '"')
+  DB_PASS=$(echo "$DB_URL" | sed -n 's|postgresql://postgres:\([^@]*\)@.*|\1|p')
+  if [ -n "$DB_PASS" ]; then
+    $SUDO -u postgres psql -c "ALTER USER postgres WITH PASSWORD '$DB_PASS';" || echo "数据库密码同步失败，请检查 PostgreSQL 状态。"
+  fi
 fi
 if [ ! -f packages/client/.env ]; then
   echo "自动生成前端 .env 文件..."
