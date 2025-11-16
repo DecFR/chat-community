@@ -116,6 +116,10 @@ if (enableCluster && cluster.isPrimary) {
           express.static(uploadsPath)
         );
         app.use('/api/auth', authRoutes);
+                // 分片上传路由
+                import('./routes/chunk-upload.routes.js').then(({ default: chunkUploadRoutes }) => {
+                  app.use('/api', chunkUploadRoutes);
+                });
         app.use('/api/users', userRoutes);
         app.use('/api/friends', friendRoutes);
         app.use('/api/servers', serverRoutes);

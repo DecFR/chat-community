@@ -8,6 +8,8 @@ import { socketService } from '../lib/socket';
 import { UserAvatar } from './UserAvatar';
 import { useUnreadStore } from '../stores/unreadStore';
 import TypingIndicator from './TypingIndicator';
+import { uploadFileInChunks } from '../lib/chunkUploader';
+import Toast from './Toast';
 
 interface Message {
   id: string;
@@ -116,6 +118,9 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
   const [isNearBottom, setIsNearBottom] = useState(true);
   const [rateLimitWaitMs, setRateLimitWaitMs] = useState(0);
   const rateLimitTimerRef = useRef<number | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [uploadFileName, setUploadFileName] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -541,6 +546,9 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, isNearBottom]);
 
+  // 定义带 _key 的消息类型，避免 any
+  type MessageWithKey = Message & { _key?: string };
+
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (rateLimitWaitMs > 0) return; // 速率限制期间禁止发送
@@ -560,13 +568,23 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
           // 附件最大 100MB
           const maxSize = 100 * 1024 * 1024;
           if (f.size > maxSize) {
-            alert(`文件过大！文件大小为 ${(f.size / 1024 / 1024).toFixed(2)} MB，最大允许 100 MB`);
+            setToast({ message: `文件过大！文件大小为 ${(f.size / 1024 / 1024).toFixed(2)} MB，最大允许 100 MB`, type: 'error' });
             continue;
           }
-          const fd = new FormData();
-          fd.append('file', f);
-          const resp = await messageAPI.uploadAttachment(fd);
-          attachments.push(resp.data.data);
+          setUploadFileName(f.name);
+          // 分片上传
+          await uploadFileInChunks({
+            file: f,
+            chunkSize: 5 * 1024 * 1024,
+            onProgress: (percent) => setUploadProgress(percent),
+            onError: (err) => setToast({ message: '分片上传失败: ' + err.message, type: 'error' }),
+            onComplete: (url) => {
+              attachments.push({ url, type: 'FILE', filename: f.name, mimeType: f.type, size: f.size });
+              setUploadProgress(null);
+              setUploadFileName(null);
+              setToast({ message: '文件上传成功', type: 'success' });
+            },
+          });
         }
       }
 
@@ -577,7 +595,6 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
       }
     };
     send();
-    
     setNewMessage('');
     setPendingFiles([]);
     setTimeout(() => markAsRead(), 500);
@@ -800,6 +817,17 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
             )}
           </div>
           <TypingIndicator typingUsers={typingUsers} />
+          {/* 上传进度条与文件名 */}
+          {uploadProgress !== null && uploadFileName && (
+            <div className="w-full bg-gray-700 h-2 mt-2 relative">
+              <div className="bg-blue-500 h-2" style={{ width: `${uploadProgress}%` }} />
+              <span className="absolute left-2 top-[-20px] text-xs text-white">{uploadFileName} {uploadProgress}%</span>
+            </div>
+          )}
+          {/* Toast 弹窗统一提示 */}
+          {toast && (
+            <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />
+          )}
         </form>
       </div>
     </div>
