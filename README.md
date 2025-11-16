@@ -56,19 +56,27 @@ chat-community/
 5. 按提示输入域名、SSL 证书路径、密钥路径（可直接回车跳过，后续可手动修改 nginx 配置）。
 6. 部署完成后，脚本会自动安装依赖、生成环境变量、初始化数据库、构建前后端、配置并重载 nginx、启动服务。
 
+
 ### 自动化说明
 - 环境变量（.env）会自动生成，数据库密码与密钥自动填充。
 - nginx 配置会根据输入自动生成，未输入则使用默认 your_domain.com 与默认证书路径。
 - 如需修改 nginx 配置、证书路径、域名等，编辑 `/etc/nginx/sites-available/chat-community.conf`，然后执行：
-  ```bash
-  sudo nginx -s reload
-  ```
+	```bash
+	sudo nginx -s reload
+	```
 - 如遇端口或防火墙问题，记得开放 80/443 端口（如 `sudo ufw allow 80,443/tcp`）。
+
+### 卸载与重装
+如需彻底清理旧环境，可使用卸载脚本：
+```bash
+chmod +x uninstall-prod-full.sh
+bash uninstall-prod-full.sh
+```
+卸载脚本会删除所有服务、配置、数据库和上传文件，数据不可恢复，请提前备份重要内容。
+卸载后可直接重新运行安装脚本，获得全新干净的部署环境。
 
 ### 验证服务
 部署完成后，访问你的域名，确认前端页面和 API 能正常访问。
-
----
 
 ---
 
