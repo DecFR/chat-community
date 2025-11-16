@@ -2,6 +2,40 @@
 # Chat Community 完整自动化生产部署脚本
 # 适用于 Ubuntu 24.04 LTS，自动安装 Node.js、pnpm、PostgreSQL、nginx、pm2
 
+echo "[安全加固] 自动清理旧文件、备份数据库、设置权限..."
+# 清理前端 dist 目录（部署前，防止残留旧文件）
+rm -rf packages/client/dist/* || true
+# 清理 uploads 目录下 30 天前的文件
+find packages/api/uploads -type f -mtime +30 -exec rm -f {} \; 2>/dev/null || true
+# 清理 pm2 日志（30 天前）
+find ~/.pm2/logs -type f -mtime +30 -exec rm -f {} \; 2>/dev/null || true
+# 清理 nginx 日志（30 天前）
+find /var/log/nginx -type f -mtime +30 -exec rm -f {} \; 2>/dev/null || true
+
+# 数据库自动备份（部署前）
+PG_BACKUP=backup_$(date +%Y%m%d_%H%M%S).sql
+sudo -u postgres pg_dump chat_community > /tmp/$PG_BACKUP 2>/dev/null && echo "数据库已备份到 /tmp/$PG_BACKUP" || echo "数据库备份失败，跳过。"
+
+# 自动执行 Prisma 数据库迁移（如有）
+cd packages/api
+if [ -d "prisma/migrations" ]; then
+  echo "执行数据库迁移..."
+  pnpm prisma migrate deploy || echo "数据库迁移失败，请检查。"
+fi
+cd ../..
+
+# 自动检测端口占用并释放（3000）
+if lsof -i:3000 | grep LISTEN; then
+  fuser -k 3000/tcp || true
+fi
+
+# 自动检测磁盘空间
+df -h | grep -E '^/|Filesystem' || true
+
+# 自动设置 .env 文件权限
+chmod 600 packages/api/.env 2>/dev/null || true
+chmod 600 packages/client/.env 2>/dev/null || true
+
 echo "自动关闭旧服务..."
 pm2 stop chat-api || true
 pm2 delete chat-api || true
@@ -152,6 +186,13 @@ if [ -d "$FRONTEND_DIST_PATH" ]; then
   fi
   echo "生成 nginx 配置..."
   cat > $NGINX_CONF_PATH <<EOF
+# 安全加固：添加常用安全头部
+add_header X-Frame-Options "SAMEORIGIN" always;
+add_header X-Content-Type-Options "nosniff" always;
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ws: wss:;" always;
+server_tokens off;
 # HTTP (端口 80) 流量将被永久重定向到 HTTPS
 server {
   listen 80;
@@ -206,7 +247,7 @@ server {
 EOF
   ln -sf $NGINX_CONF_PATH /etc/nginx/sites-enabled/chat-community.conf
   echo "重载 nginx..."
-  sudo nginx -s reload
+  sudo systemctl restart nginx
   echo "$DOMAIN_MSG"
   echo "$CERT_MSG"
   echo "$KEY_MSG"
