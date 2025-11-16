@@ -194,6 +194,12 @@ $SUDO pnpm run setup:db
 echo "构建前后端..."
 $SUDO pnpm build
 
+# 自动修复静态文件和上传目录权限，确保 nginx/后端可读
+$SUDO chown -R $USER:$USER packages/client/dist
+$SUDO chmod -R 755 packages/client/dist
+$SUDO chown -R $USER:$USER packages/api/uploads
+$SUDO chmod -R 755 packages/api/uploads
+
 # 6. 启动后端服务（使用 pm2 管理）
 echo "启动后端服务..."
 cd packages/api
