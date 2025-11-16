@@ -26,6 +26,7 @@ const chunkStorage = multer.diskStorage({
   },
 });
 
+// 单片默认最大 20MB（可根据需要在客户端调整 chunkSize 或此处放宽）
 const uploadChunk = multer({
   storage: chunkStorage,
   limits: { fileSize: 20 * 1024 * 1024 }, // 单片最大 20MB
@@ -52,19 +53,33 @@ router.post('/upload-chunk', authMiddleware, uploadChunk.single('chunk'), async 
 });
 
 // 合并分片接口
+// 限制单个完整文件最大 2GB
+const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024; // 2GB
+
 router.post('/merge-chunks', authMiddleware, async (req, res) => {
   try {
     const { fileId, filename, totalChunks } = req.body;
     if (!fileId || !filename || !totalChunks) {
       return res.status(400).json({ success: false, error: '参数缺失' });
     }
-    const finalPath = path.join(UPLOAD_DIR, `media-${fileId}-${Date.now()}${path.extname(filename)}`);
-    const writeStream = fs.createWriteStream(finalPath);
+    // 在合并前计算所有分片大小以验证是否超过限制
+    let totalSize = 0;
     for (let i = 0; i < totalChunks; i++) {
       const chunkPath = path.join(CHUNK_DIR, `${fileId}_${i}`);
       if (!fs.existsSync(chunkPath)) {
         return res.status(400).json({ success: false, error: `分片 ${i} 缺失` });
       }
+      const stat = fs.statSync(chunkPath);
+      totalSize += stat.size;
+      if (totalSize > MAX_FILE_SIZE) {
+        return res.status(400).json({ success: false, error: '文件超过允许的最大大小 2GB' });
+      }
+    }
+
+    const finalPath = path.join(UPLOAD_DIR, `media-${fileId}-${Date.now()}${path.extname(filename)}`);
+    const writeStream = fs.createWriteStream(finalPath);
+    for (let i = 0; i < totalChunks; i++) {
+      const chunkPath = path.join(CHUNK_DIR, `${fileId}_${i}`);
       const data = fs.readFileSync(chunkPath);
       writeStream.write(data);
       fs.unlinkSync(chunkPath);

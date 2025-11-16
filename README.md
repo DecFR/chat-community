@@ -1,145 +1,141 @@
+# Chat-Community — 部署说明
 
-# Chat Community
+此仓库为 Chat & Community 应用（全栈）。本文件补充了一键式 Linux 构建、环境安装与打包脚本，方便把仅包含运行时所需文件的发布包生成并传到目标服务器。
 
-## 部署与安全更新（2025-11）
+**新增文件**
+- `deploy.sh`：一键完成如下流程：
+	- 可选自动安装运行时环境（Node.js 22 LTS、PostgreSQL 18、pnpm/corepack 以及常用系统依赖），支持常见 Linux 发行版（基于 `apt` 或 `dnf`/`yum`）。
+	- 在仓库内构建工作区（`pnpm -r build`）。
+	- 生成精简的 `deploy_package`，包含 `api/dist`、`client/dist`、`install_prod_deps.sh`、`run_api.sh`、`chat-community.service` 模板等。
 
-- 自动修复 ENCRYPTION_KEY 格式，避免后端启动报错。
-- `prisma:migrate` 已切换为生产安全模式（deploy），防止开发命令误用。
-- 所有涉及 `__dirname` 的 ESM 文件已统一修复，兼容 Node.js ES Module 规范。
-- 部署脚本日志输出已优化，执行完自动返回命令行，便于批量运维。
-- 部署/卸载脚本均支持一键全自动，环境变量、数据库、nginx、服务均自动配置。
-- 安全加固建议已集成到 README，覆盖依赖、环境、nginx、认证、限流、备份等关键环节。
-## 安全加固建议
+目的：不直接删除源码或仓库文件，而是在本地生成一个精简的发布目录（`deploy_package`），该目录仅包含运行时所需的文件，用于传到 Linux 服务器并快速部署。
 
-1. **依赖安全**：定期更新所有依赖，使用 `pnpm audit` 检查并修复安全漏洞。
-2. **环境变量管理**：敏感信息（如数据库密码、密钥）仅通过环境变量传递，严禁硬编码。
-3. **内网访问限制**：数据库、Redis 等服务仅允许内网访问，防止外部攻击。
-4. **HTTPS/SSL 加密**：nginx 配置 SSL 证书，强制所有流量走 HTTPS。
-5. **nginx 安全 headers**：建议在 nginx 配置中加入：
-	- `X-Frame-Options: DENY`
-	- `X-Content-Type-Options: nosniff`
-	- `Content-Security-Policy: default-src 'self'`
-	- `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`
-6. **前端防 XSS**：所有用户输入内容需转义，富文本/消息渲染时禁止注入脚本。
-7. **后端防 SQL 注入**：所有数据库操作使用 ORM（如 Prisma），严禁拼接 SQL。
-8. **认证与权限**：接口需校验用户身份和权限，敏感操作需二次确认。
-9. **关闭调试与详细错误**：生产环境关闭 debug 日志和详细错误输出，防止信息泄露。
-10. **日志与监控**：建议接入日志收集与异常监控（如 Prometheus、ELK），及时发现异常。
-11. **自动化脚本安全**：部署/卸载脚本不暴露敏感信息，关键操作需 sudo 权限。
-12. **API 限流与防刷**：接口建议加限流（如 express-rate-limit），防止暴力攻击。
-13. **会话安全**：用户登录态建议使用 HttpOnly、Secure Cookie，支持多端会话管理。
-14. **定期备份**：数据库和重要数据定期自动备份，防止数据丢失。
-15. **自动化测试**：建议加入安全相关自动化测试（如 XSS、SQL 注入、权限绕过等）。
+环境安装说明
+- 脚本支持两类自动安装：Debian/Ubuntu（`apt`）与 RHEL/Fedora/CentOS（`dnf`/`yum`）。
+- 安装内容（可选）：
+	- Node.js 22 LTS（通过 NodeSource 官方脚本）
+	- PostgreSQL 18（通过 PostgreSQL 官方仓库/PGDG）
+	- pnpm（尝试通过 `corepack` 或 `npm -g` 安装）
+	- 基础工具：`curl`/`wget`/`ca-certificates`/`gnupg`/编译工具
+- 脚本会检测当前是否以 root 运行；若非 root，会在需要提权的命令前使用 `sudo`（必须系统中有 sudo）。
+- 非交互运行：传入 `--yes` 或 `-y` 可跳过交互确认（适合 CI）。
 
-> 拓展：如需更高级安全方案，可集成 OAuth2、双因子认证、Web Application Firewall（WAF）、安全审计等。
-# Chat Community
-
-一个全栈实时聊天与社区平台，支持多用户、频道、好友、消息、通知等功能，前端基于 React + Vite，后端基于 Express + Prisma。
-
-## 主要功能
-
-- 实时聊天与频道管理
-- 好友系统与请求
-- 用户注册、登录、鉴权
-- 消息通知与推送
-- 服务器与频道管理
-- 多端支持，响应式界面
-
-## 技术栈
-
-- 前端：React, Vite, Zustand, Socket.IO, TailwindCSS
-- 后端：Express, Prisma, PostgreSQL, Passport, Socket.IO
-- 工具：pnpm, TypeScript, ESLint
-
-## 目录结构
-
-```text
-chat-community/
-├── packages/
-│   ├── api/      # 后端服务
-│   └── client/   # 前端应用
-├── package.json  # 根依赖与脚本
-├── pnpm-workspace.yaml
-└── README.md
-```
-
-## 环境变量
-
-- 后端：`packages/api/.env.example`
-- 前端：`packages/client/.env.example`
-
-## 快速开始
-
-1. 安装依赖：`pnpm install`
-2. 初始化数据库：`pnpm run setup:db`
-3. 启动开发环境：`pnpm dev`
-
-## 生产环境一键部署
-
-推荐使用自动化脚本 `deploy-prod-full.sh` 进行生产部署，支持 Ubuntu 24.04 LTS。
-
-### 步骤
-
-1. 上传项目代码到服务器（如用 scp、rsync 或 git clone）。
-
-2. 进入项目根目录：
-
-	```bash
-	cd ~/chat-community
-	```
-
-3. 赋予脚本执行权限：
-
-	```bash
-	chmod +x deploy-prod-full.sh
-	```
-
-4. 运行部署脚本（建议用 bash）：
-
-	```bash
-	bash deploy-prod-full.sh
-	```
-
-5. 按提示输入域名、SSL 证书路径、密钥路径（可直接回车跳过，后续可手动修改 nginx 配置）。
-
-6. 部署完成后，脚本会自动安装依赖、生成环境变量、初始化数据库、构建前后端、配置并重载 nginx、启动服务。
-
-### 自动化说明
-
-- 环境变量（.env）会自动生成，数据库密码与密钥自动填充。
-- nginx 配置会根据输入自动生成，未输入则使用默认 your_domain.com 与默认证书路径。
-- 如需修改 nginx 配置、证书路径、域名等，编辑 `/etc/nginx/sites-available/chat-community.conf`，然后执行：
-
-	```bash
-	sudo nginx -s reload
-	```
-
-- 如遇端口或防火墙问题，记得开放 80/443 端口（如 `sudo ufw allow 80,443/tcp`）。
-
-### 卸载与重装
-
-如需彻底清理旧环境，可使用卸载脚本：
+快速使用
+1. 给脚本赋可执行权限并运行（在本地开发机或 CI 上执行）：
 
 ```bash
-chmod +x uninstall-prod-full.sh
-bash uninstall-prod-full.sh
+chmod +x ./deploy.sh
+./deploy.sh        # 交互式，询问是否安装环境
+./deploy.sh --yes  # 非交互式，自动安装环境并构建
 ```
 
-卸载脚本会删除所有服务、配置、数据库和上传文件，数据不可恢复，请提前备份重要内容。
-卸载后可直接重新运行安装脚本，获得全新干净的部署环境。
+2. 脚本完成后，会在仓库根生成 `deploy_package`。将它打包并传到目标服务器：
 
-### 验证服务
+```bash
+tar -czf chat-community-deploy.tar.gz -C . deploy_package
+scp chat-community-deploy.tar.gz user@server:/tmp/
+# 或者使用 rsync/sftp 等
+```
 
-部署完成后，访问你的域名，确认前端页面和 API 能正常访问。
+3. 在目标服务器上：
+
+```bash
+tar -xzf chat-community-deploy.tar.gz -C /opt/
+cd /opt/deploy_package
+./install_prod_deps.sh    # 在目标机器安装生产依赖（需要 pnpm 或 corepack）
+./run_api.sh &            # 或者用 systemd 管理
+```
+
+systemd 示例
+1. 将 `deploy_package/chat-community.service` 复制到 `/etc/systemd/system/chat-community.service`，编辑 `WorkingDirectory` 为 `/opt/deploy_package/api` 或你选择的路径。
+2. 启用并启动服务：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now chat-community.service
+sudo journalctl -u chat-community.service -f
+```
+
+注意事项
+- 脚本不会替你在目标机器上创建数据库或执行 `prisma migrate deploy`（生产环境建议在部署前运行或由 CI/CD 负责）。
+- 请确保目标机器的 Node ABI 与构建时一致；若要将 `node_modules` 一并打包，请在 CI 中为目标平台安装生产依赖后一起打包。
+ - 脚本不会替你在目标机器上创建数据库或执行 `prisma migrate deploy`（生产环境建议在部署前运行或由 CI/CD 负责）。
+ - 请确保目标机器的 Node ABI 与构建时一致；若要将 `node_modules` 一并打包，请在 CI 中为目标平台安装生产依赖后一起打包。
+ - 脚本在生成 `packages/api/.env` 及发布包副本时，会将该文件权限设置为 `600`（仅所有者可读写），以减少凭据泄露风险。
+
+可选改进（我可以帮你实现）
+- 在 CI 中生成包含生产 `node_modules` 的发布包（更快的部署，但需确保平台一致性）。
+- 生成 Dockerfile / docker-compose 配置用于容器化部署。
+
+HTTPS / Nginx 配置示例
+ - 脚本支持通过环境变量定制 nginx 的域名与证书路径：
+   - `NGINX_DOMAIN`：你的域名（例如 `example.com`）
+   - `SSL_CERT`：证书文件绝对路径（例如 `/etc/ssl/certs/example.com.pem`）
+   - `SSL_KEY`：证书私钥绝对路径（例如 `/etc/ssl/private/example.com.key`）
+   - `PROXY_PORT`：后端监听端口（默认 `3000`）
+
+ - 使用方式示例（在运行 `deploy.sh` 前导出变量或者在同一行传入）：
+
+```bash
+export NGINX_DOMAIN=your_domain.com
+export SSL_CERT=/etc/ssl/certs/your_domain.com.pem
+export SSL_KEY=/etc/ssl/private/your_domain.com.key
+export PROXY_PORT=3000
+./deploy.sh --yes
+```
+
+ - 如果未提供证书路径，脚本会生成一个示例配置文件：
+   `/etc/nginx/sites-available/chat-community-ssl.example`，你可以编辑该文件、替换 `your_domain.com` 与证书路径，然后移动到：
+
+```bash
+sudo mv /etc/nginx/sites-available/chat-community-ssl.example /etc/nginx/sites-available/chat-community-ssl
+sudo ln -s /etc/nginx/sites-available/chat-community-ssl /etc/nginx/sites-enabled/chat-community-ssl
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+ - 示例 HTTPS 配置（脚本生成或示例文件内容）：
+
+```nginx
+# HTTP -> HTTPS 重定向
+server {
+	listen 80;
+	listen [::]:80;
+	server_name your_domain.com;
+	return 301 https://$server_name$request_uri;
+}
+
+# HTTPS 服务
+server {
+	listen 443 ssl http2;
+	listen [::]:443 ssl http2;
+	server_name your_domain.com;
+
+	ssl_certificate /etc/ssl/certs/your_domain.com.pem;
+	ssl_certificate_key /etc/ssl/private/your_domain.com.key;
+
+	ssl_protocols TLSv1.2 TLSv1.3;
+	ssl_prefer_server_ciphers on;
+
+	# client_max_body_size 0; # 如需上传大文件可取消注释
+
+	root /var/www/chat-community/client;
+	index index.html;
+
+	location /api/ {
+		proxy_pass http://127.0.0.1:3000/; # 修改为 $PROXY_PORT 如需
+		proxy_set_header Host $host;
+		proxy_set_header X-Real-IP $remote_addr;
+		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+		proxy_set_header X-Forwarded-Proto $scheme;
+		proxy_set_header Upgrade $http_upgrade;
+		proxy_set_header Connection "upgrade";
+	}
+
+	location / {
+		try_files $uri $uri/ /index.html;
+	}
+}
+```
 
 ---
-
-## 隐私与安全
-
-- 请勿上传敏感信息或隐私数据。
-- 生产环境请更换所有密钥与数据库配置。
-- 上传目录仅用于存储用户头像与媒体文件。
-
-## License
-
-MIT
+生成时间：自动生成（含构建脚本和部署说明）
