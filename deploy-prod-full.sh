@@ -291,7 +291,11 @@ if [ ! -f dist/server.js ]; then
   cd ../..
   exit 1
 fi
-$SUDO pm2 restart chat-api || $SUDO pm2 start dist/server.js --name chat-api --update-env
+if $SUDO pm2 list | grep -q "chat-api"; then
+  $SUDO pm2 restart chat-api --update-env
+else
+  $SUDO pm2 start dist/server.js --name chat-api --update-env
+fi
 cd ../..
 cd packages/client
 
