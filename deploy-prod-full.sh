@@ -96,12 +96,15 @@ if command -v node >/dev/null 2>&1; then
     $SUDO apt-get purge -y nodejs npm || true
     $SUDO rm -rf /usr/local/lib/node_modules /usr/lib/node_modules /usr/local/bin/node /usr/bin/node /usr/local/bin/npm /usr/bin/npm
   else
-    echo "跳过 Node.js 卸载。"
+    echo "跳过 Node.js 卸载和安装。"
+    NODE_SKIP_INSTALL=1
   fi
 fi
-echo "安装 Node.js 最新 LTS (22.x)..."
-curl -fsSL https://deb.nodesource.com/setup_22.x | $SUDO -E bash -
-$SUDO apt-get install -y nodejs
+if [ -z "$NODE_SKIP_INSTALL" ]; then
+  echo "安装 Node.js 最新 LTS (22.x)..."
+  curl -fsSL https://deb.nodesource.com/setup_22.x | $SUDO -E bash -
+  $SUDO apt-get install -y nodejs
+fi
 
 # pnpm
 
@@ -114,11 +117,14 @@ if command -v pnpm >/dev/null 2>&1; then
     $SUDO npm uninstall -g pnpm || true
     $SUDO rm -rf /usr/local/bin/pnpm /usr/bin/pnpm
   else
-    echo "跳过 pnpm 卸载。"
+    echo "跳过 pnpm 卸载和安装。"
+    PNPM_SKIP_INSTALL=1
   fi
 fi
-echo "安装 pnpm 最新 LTS (9.x)..."
-$SUDO npm install -g pnpm@latest
+if [ -z "$PNPM_SKIP_INSTALL" ]; then
+  echo "安装 pnpm 最新 LTS (9.x)..."
+  $SUDO npm install -g pnpm@latest
+fi
 
 # PostgreSQL
 
@@ -133,21 +139,24 @@ if command -v psql >/dev/null 2>&1; then
     $SUDO apt-get purge -y postgresql* || true
     $SUDO rm -rf /var/lib/postgresql /etc/postgresql /etc/postgresql-common /usr/lib/postgresql /usr/share/postgresql /var/log/postgresql
   else
-    echo "跳过 PostgreSQL 卸载。"
+    echo "跳过 PostgreSQL 卸载和安装。"
+    PG_SKIP_INSTALL=1
   fi
 fi
-echo "安装 PostgreSQL 最新版 (18.x)..."
-$SUDO apt-get update
-$SUDO apt-get install -y wget ca-certificates
-if [ -f /etc/apt/trusted.gpg.d/postgresql.gpg ]; then
-  $SUDO rm -f /etc/apt/trusted.gpg.d/postgresql.gpg
+if [ -z "$PG_SKIP_INSTALL" ]; then
+  echo "安装 PostgreSQL 最新版 (18.x)..."
+  $SUDO apt-get update
+  $SUDO apt-get install -y wget ca-certificates
+  if [ -f /etc/apt/trusted.gpg.d/postgresql.gpg ]; then
+    $SUDO rm -f /etc/apt/trusted.gpg.d/postgresql.gpg
+  fi
+  wget -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | $SUDO gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/postgresql.gpg
+  echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" | $SUDO tee /etc/apt/sources.list.d/pgdg.list
+  $SUDO apt-get update
+  $SUDO apt-get install -y postgresql-18 postgresql-contrib
+  $SUDO systemctl enable postgresql
+  $SUDO systemctl start postgresql
 fi
-wget -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | $SUDO gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/postgresql.gpg
-echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" | $SUDO tee /etc/apt/sources.list.d/pgdg.list
-$SUDO apt-get update
-$SUDO apt-get install -y postgresql-18 postgresql-contrib
-$SUDO systemctl enable postgresql
-$SUDO systemctl start postgresql
 
 # nginx
 
@@ -162,13 +171,16 @@ if command -v nginx >/dev/null 2>&1; then
     $SUDO apt-get purge -y nginx* || true
     $SUDO rm -rf /etc/nginx /var/log/nginx /var/www/html
   else
-    echo "跳过 nginx 卸载。"
+    echo "跳过 nginx 卸载和安装。"
+    NGINX_SKIP_INSTALL=1
   fi
 fi
-echo "安装 nginx 最新稳定版 (1.26.x)..."
-$SUDO apt-get install -y nginx
-$SUDO systemctl enable nginx
-$SUDO systemctl start nginx
+if [ -z "$NGINX_SKIP_INSTALL" ]; then
+  echo "安装 nginx 最新稳定版 (1.26.x)..."
+  $SUDO apt-get install -y nginx
+  $SUDO systemctl enable nginx
+  $SUDO systemctl start nginx
+fi
 
 # pm2
 
@@ -182,11 +194,14 @@ if command -v pm2 >/dev/null 2>&1; then
     $SUDO npm uninstall -g pm2 || true
     $SUDO rm -rf /usr/local/bin/pm2 /usr/bin/pm2 ~/.pm2
   else
-    echo "跳过 pm2 卸载。"
+    echo "跳过 pm2 卸载和安装。"
+    PM2_SKIP_INSTALL=1
   fi
 fi
-echo "安装 pm2 最新 LTS (5.x)..."
-$SUDO npm install -g pm2@latest
+if [ -z "$PM2_SKIP_INSTALL" ]; then
+  echo "安装 pm2 最新 LTS (5.x)..."
+  $SUDO npm install -g pm2@latest
+fi
 
 # 1. 拉取最新代码（如用 git）
 if [ -d .git ]; then
@@ -253,6 +268,10 @@ $SUDO pnpm build
 # 自动修复静态文件和上传目录权限，确保 nginx/后端可读
 $SUDO chown -R $USER:$USER packages/client/dist
 $SUDO chmod -R 755 packages/client/dist
+# 自动创建 uploads 目录（如不存在）
+if [ ! -d packages/api/uploads ]; then
+  mkdir -p packages/api/uploads
+fi
 $SUDO chown -R $USER:$USER packages/api/uploads
 $SUDO chmod -R 755 packages/api/uploads
 
