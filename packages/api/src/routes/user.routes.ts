@@ -8,7 +8,7 @@ import { nanoid } from 'nanoid';
 import { userController } from '../controllers/user.controller.js';
 import { authMiddleware } from '../middleware/auth.js';
 
-const router = Router();
+const router: Router = Router();
 
 // ESM 解析当前文件目录，统一 uploads 绝对路径
 const __filename = fileURLToPath(import.meta.url);

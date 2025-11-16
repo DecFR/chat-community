@@ -4,7 +4,7 @@ import { Router } from 'express';
 import { authMiddleware } from '../middleware/auth.js';
 import { getIO } from '../socket/index.js';
 
-const router = Router();
+const router: Router = Router();
 
 // 所有服务器路由都需要认证
 router.use(authMiddleware);

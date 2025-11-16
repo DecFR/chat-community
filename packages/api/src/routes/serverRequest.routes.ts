@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { serverRequestController } from '../controllers/serverRequest.controller.js';
 import { authMiddleware } from '../middleware/auth.js';
 
-const router = Router();
+const router: Router = Router();
 
 // 所有路由都需要认证
 router.use(authMiddleware);

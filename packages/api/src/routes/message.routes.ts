@@ -8,7 +8,7 @@ import { nanoid } from 'nanoid';
 
 import { authMiddleware } from '../middleware/auth.js';
 
-const router = Router();
+const router: Router = Router();
 
 // 所有消息路由都需要认证
 router.use(authMiddleware);

@@ -4,7 +4,7 @@ import { authController } from '../controllers/auth.controller.js';
 import { authMiddleware } from '../middleware/auth.js';
 import logger from '../utils/logger.js';
 
-const router = Router();
+const router: Router = Router();
 
 /**
  * @route   POST /api/auth/register

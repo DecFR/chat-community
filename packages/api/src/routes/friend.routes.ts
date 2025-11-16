@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { friendController } from '../controllers/friend.controller.js';
 import { authMiddleware } from '../middleware/auth.js';
 
-const router = Router();
+const router: Router = Router();
 
 /**
  * @route   POST /api/friends/request

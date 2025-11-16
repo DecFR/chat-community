@@ -6,7 +6,7 @@ import { rescheduleAvatarCleanupScheduler } from '../utils/avatarCleanupSchedule
 import { cleanupUnusedAvatars } from '../utils/cleanup.js';
 import { getAvatarCleanupConfig, updateAvatarCleanupConfig } from '../utils/config.js';
 
-const router = Router();
+const router: Router = Router();
 /**
  * @route   GET /api/admin/notifications
  * @desc    获取当前管理员的系统通知

@@ -29,7 +29,10 @@ if ! command -v psql >/dev/null 2>&1; then
   echo "安装 PostgreSQL 最新版 (18.x)..."
   sudo apt-get update
   sudo apt-get install -y wget ca-certificates
-  wget -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
+  if [ -f /etc/apt/trusted.gpg.d/postgresql.gpg ]; then
+    sudo rm -f /etc/apt/trusted.gpg.d/postgresql.gpg
+  fi
+  wget -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/postgresql.gpg
   echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
   sudo apt-get update
   sudo apt-get install -y postgresql-18 postgresql-contrib

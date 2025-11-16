@@ -5,7 +5,7 @@ import multer from 'multer';
 import { nanoid } from 'nanoid';
 import { authMiddleware } from '../middleware/auth.js';
 
-const router = Router();
+const router: Router = Router();
 const UPLOAD_DIR = path.resolve(__dirname, '../../uploads');
 const CHUNK_DIR = path.resolve(__dirname, '../../uploads/chunks');
 
@@ -29,10 +29,13 @@ const uploadChunk = multer({
 // 上传分片接口
 router.post('/upload-chunk', authMiddleware, uploadChunk.single('chunk'), async (req, res) => {
   try {
-    const { file } = req;
+    const file = req.file as Express.Multer.File | undefined;
     const { fileId, chunkIndex, totalChunks } = req.body;
     if (!fileId || chunkIndex === undefined || !totalChunks) {
       return res.status(400).json({ success: false, error: '参数缺失' });
+    }
+    if (!file) {
+      return res.status(400).json({ success: false, error: '文件缺失' });
     }
     // 分片已保存到 CHUNK_DIR，命名规则 fileId_chunkIndex
     const chunkName = `${fileId}_${chunkIndex}`;
