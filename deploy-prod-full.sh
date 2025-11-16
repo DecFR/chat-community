@@ -85,57 +85,78 @@ set -e
 
 
 # Node.js
-if ! command -v node >/dev/null 2>&1; then
-  echo "安装 Node.js 最新 LTS (22.x)..."
-  curl -fsSL https://deb.nodesource.com/setup_22.x | $SUDO -E bash -
-  $SUDO apt-get install -y nodejs
-else
-  echo "Node.js 已安装，跳过。"
+
+# 检查并卸载已安装 Node.js
+if command -v node >/dev/null 2>&1; then
+  echo "检测到已安装 Node.js，自动卸载..."
+  $SUDO apt-get remove -y nodejs npm || true
+  $SUDO apt-get purge -y nodejs npm || true
+  $SUDO rm -rf /usr/local/lib/node_modules /usr/lib/node_modules /usr/local/bin/node /usr/bin/node /usr/local/bin/npm /usr/bin/npm
 fi
+echo "安装 Node.js 最新 LTS (22.x)..."
+curl -fsSL https://deb.nodesource.com/setup_22.x | $SUDO -E bash -
+$SUDO apt-get install -y nodejs
 
 # pnpm
-if ! command -v pnpm >/dev/null 2>&1; then
-  echo "安装 pnpm 最新 LTS (9.x)..."
-  $SUDO npm install -g pnpm@latest
-else
-  echo "pnpm 已安装，跳过。"
+
+# 检查并卸载已安装 pnpm
+if command -v pnpm >/dev/null 2>&1; then
+  echo "检测到已安装 pnpm，自动卸载..."
+  $SUDO npm uninstall -g pnpm || true
+  $SUDO rm -rf /usr/local/bin/pnpm /usr/bin/pnpm
 fi
+echo "安装 pnpm 最新 LTS (9.x)..."
+$SUDO npm install -g pnpm@latest
 
 # PostgreSQL
-if ! command -v psql >/dev/null 2>&1; then
-  echo "安装 PostgreSQL 最新版 (18.x)..."
-  $SUDO apt-get update
-  $SUDO apt-get install -y wget ca-certificates
-  if [ -f /etc/apt/trusted.gpg.d/postgresql.gpg ]; then
-    $SUDO rm -f /etc/apt/trusted.gpg.d/postgresql.gpg
-  fi
-  wget -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | $SUDO gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/postgresql.gpg
-  echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" | $SUDO tee /etc/apt/sources.list.d/pgdg.list
-  $SUDO apt-get update
-  $SUDO apt-get install -y postgresql-18 postgresql-contrib
-  $SUDO systemctl enable postgresql
-  $SUDO systemctl start postgresql
-else
-  echo "PostgreSQL 已安装，跳过。"
+
+# 检查并卸载已安装 PostgreSQL
+if command -v psql >/dev/null 2>&1; then
+  echo "检测到已安装 PostgreSQL，自动卸载..."
+  $SUDO systemctl stop postgresql || true
+  $SUDO apt-get remove -y postgresql* || true
+  $SUDO apt-get purge -y postgresql* || true
+  $SUDO rm -rf /var/lib/postgresql /etc/postgresql /etc/postgresql-common /usr/lib/postgresql /usr/share/postgresql /var/log/postgresql
 fi
+echo "安装 PostgreSQL 最新版 (18.x)..."
+$SUDO apt-get update
+$SUDO apt-get install -y wget ca-certificates
+if [ -f /etc/apt/trusted.gpg.d/postgresql.gpg ]; then
+  $SUDO rm -f /etc/apt/trusted.gpg.d/postgresql.gpg
+fi
+wget -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | $SUDO gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/postgresql.gpg
+echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" | $SUDO tee /etc/apt/sources.list.d/pgdg.list
+$SUDO apt-get update
+$SUDO apt-get install -y postgresql-18 postgresql-contrib
+$SUDO systemctl enable postgresql
+$SUDO systemctl start postgresql
 
 # nginx
-if ! command -v nginx >/dev/null 2>&1; then
-  echo "安装 nginx 最新稳定版 (1.26.x)..."
-  $SUDO apt-get install -y nginx
-  $SUDO systemctl enable nginx
-  $SUDO systemctl start nginx
-else
-  echo "nginx 已安装，跳过。"
+
+# 检查并卸载已安装 nginx
+if command -v nginx >/dev/null 2>&1; then
+  echo "检测到已安装 nginx，自动卸载..."
+  $SUDO systemctl stop nginx || true
+  $SUDO apt-get remove -y nginx* || true
+  $SUDO apt-get purge -y nginx* || true
+  $SUDO rm -rf /etc/nginx /var/log/nginx /var/www/html
 fi
+echo "安装 nginx 最新稳定版 (1.26.x)..."
+$SUDO apt-get install -y nginx
+$SUDO systemctl enable nginx
+$SUDO systemctl start nginx
 
 # pm2
-if ! command -v pm2 >/dev/null 2>&1; then
-  echo "安装 pm2 最新 LTS (5.x)..."
-  $SUDO npm install -g pm2@latest
-else
-  echo "pm2 已安装，跳过。"
+
+# 检查并卸载已安装 pm2
+if command -v pm2 >/dev/null 2>&1; then
+  echo "检测到已安装 pm2，自动卸载..."
+  $SUDO pm2 kill || true
+  $SUDO npm uninstall -g pm2 || true
+  $SUDO rm -rf /usr/local/bin/pm2 /usr/bin/pm2 ~/.pm2
 fi
+echo "安装 pm2 最新 LTS (5.x)..."
+$SUDO npm install -g pm2@latest
 
 # 1. 拉取最新代码（如用 git）
 if [ -d .git ]; then
@@ -207,7 +228,8 @@ $SUDO chmod -R 755 packages/api/uploads
 echo "启动后端服务..."
 cd packages/api
 $SUDO pm2 restart chat-api || $SUDO pm2 start dist/server.js --name chat-api --update-env
-cd ../client
+cd ../..
+cd packages/client
 
 # 7. 构建前端后，将 dist 目录交由 nginx 托管
 NGINX_CONF_PATH="/etc/nginx/sites-available/chat-community.conf"
