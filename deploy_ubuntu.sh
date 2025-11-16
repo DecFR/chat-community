@@ -278,29 +278,29 @@ while [ "$TEST_DB_OK" -ne 1 ]; do
         echo "重试数据库连接测试..." ;;
       e|E)
         echo "请编辑 packages/api/.env（例如使用 nano 或你的编辑器），保存后按回车继续。"
-        i|I)
-          echo "将安装并初始化本机 PostgreSQL（name=${DB_NAME} user=${DB_USER}）..."
-          sudo apt update
-          sudo apt install -y postgresql postgresql-contrib
-          sudo systemctl enable --now postgresql || true
+        read -r
 
-          if [ -z "$DB_PASS" ]; then
-            echo "未提供数据库密码，生成随机密码..."
-            DB_PASS=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 16 || echo "changeme123")
-          fi
+      i|I)
+        echo "将安装并初始化本机 PostgreSQL（name=${DB_NAME} user=${DB_USER}）..."
+        sudo apt update
+        sudo apt install -y postgresql postgresql-contrib
+        sudo systemctl enable --now postgresql || true
 
-          sudo -u postgres psql -c "DO \\$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${DB_USER}') THEN CREATE ROLE ${DB_USER} WITH LOGIN PASSWORD '${DB_PASS}'; END IF; END \\$\$;" || true
-          sudo -u postgres psql -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};" || true
+        if [ -z "$DB_PASS" ]; then
+          echo "未提供数据库密码，生成随机密码..."
+          DB_PASS=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 16 || echo "changeme123")
+        fi
 
-          DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@127.0.0.1:5432/${DB_NAME}?schema=public"
-          echo "DATABASE_URL=\"${DATABASE_URL}\"" > packages/api/.env.local
-          chmod 600 packages/api/.env.local || true
-          export DATABASE_URL="${DATABASE_URL}"
-          echo "已在本机安装并写入 packages/api/.env.local（权限 600），并为当前进程导出 DATABASE_URL。"
-          echo "正在重试数据库连接测试..."
-          ;;
-          echo "已在本机安装并写入 packages/api/.env，正在重试数据库连接测试..."
-          ;;
+        sudo -u postgres psql -c "DO \\$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${DB_USER}') THEN CREATE ROLE ${DB_USER} WITH LOGIN PASSWORD '${DB_PASS}'; END IF; END \\$\$;" || true
+        sudo -u postgres psql -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};" || true
+
+        DATABASE_URL="postgresql://${DB_USER}:${DB_PASS}@127.0.0.1:5432/${DB_NAME}?schema=public"
+        echo "DATABASE_URL=\"${DATABASE_URL}\"" > packages/api/.env.local
+        chmod 600 packages/api/.env.local || true
+        export DATABASE_URL="${DATABASE_URL}"
+        echo "已在本机安装并写入 packages/api/.env.local（权限 600），并为当前进程导出 DATABASE_URL。"
+        echo "正在重试数据库连接测试..."
+        ;;
       s|S)
         echo "已选择跳过数据库测试，继续后续步骤（注意：可能导致迁移/运行失败）。"
         break
