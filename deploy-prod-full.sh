@@ -221,6 +221,7 @@ if [ -f packages/api/.env ]; then
   OLD_KEY=$(grep '^ENCRYPTION_KEY=' packages/api/.env | cut -d'=' -f2)
   if ! echo "$OLD_KEY" | grep -Eq '^[0-9a-fA-F]{64}$'; then
     echo "检测到 ENCRYPTION_KEY 格式错误，自动修复..."
+    $SUDO chmod 600 packages/api/.env 2>/dev/null || true
     NEW_KEY=$(openssl rand -hex 32)
     $SUDO sed -i "s/^ENCRYPTION_KEY=.*/ENCRYPTION_KEY=$NEW_KEY/" packages/api/.env
   fi
@@ -240,10 +241,12 @@ UPLOAD_DIR=./uploads
 MAX_FILE_SIZE=104857600
 AVATAR_MAX_FILE_SIZE=31457280
 EOF
+  $SUDO chmod 600 packages/api/.env 2>/dev/null || true
   echo "已自动生成 packages/api/.env，数据库密码已自动设置。"
 fi
 # 无论 .env 是新生成还是已存在，统一自动同步数据库密码
 if [ -f packages/api/.env ]; then
+  $SUDO chmod 600 packages/api/.env 2>/dev/null || true
   DB_URL=$(grep '^DATABASE_URL=' packages/api/.env | cut -d'=' -f2 | tr -d '"')
   DB_PASS=$(echo "$DB_URL" | sed -n 's|postgresql://postgres:\([^@]*\)@.*|\1|p')
   if [ -n "$DB_PASS" ]; then
