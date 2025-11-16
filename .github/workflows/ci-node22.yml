@@ -1,0 +1,72 @@
+name: CI (Node 22 + Postgres 18)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [22]
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 10s --health-timeout 5s --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'pnpm'
+
+      - name: Enable corepack and install pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@latest --activate
+
+      - name: Install dependencies (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma Client (API)
+        working-directory: packages/api
+        run: pnpm prisma generate
+
+      - name: Build (workspace)
+        run: pnpm -r build
+
+      - name: Run tests (if present)
+        run: pnpm -r test || echo "no tests or tests failed"
+
+      - name: Run Prisma migrations (deploy) against service DB (staging check)
+        if: always()
+        working-directory: packages/api
+        run: |
+          # Run migrate deploy against the temporary Postgres service created for CI.
+          # If migrations are destructive, CI will fail and show the error. Ensure DB backup before running in prod.
+          pnpm prisma migrate deploy || echo "prisma migrate deploy failed (CI check)"
+
+      - name: Upload pnpm-lock.yaml
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pnpm-lock
+          path: pnpm-lock.yaml

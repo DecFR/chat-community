@@ -79,7 +79,19 @@ else
 fi
 
 echo "安装依赖（pnpm）并构建项目..."
-pnpm install --frozen-lockfile || pnpm install
+
+# 询问是否先将依赖升级到最新版本（危险操作，可能引入 breaking change）
+read -p "是否在服务器上将所有依赖升级到最新版本？这会修改 package.json 与锁文件，并可能引入不兼容改动。已备份数据库并接受风险？ (y/N): " USE_LATEST
+USE_LATEST=${USE_LATEST:-N}
+if [ "$USE_LATEST" = "y" ] || [ "$USE_LATEST" = "Y" ]; then
+  echo "将尝试升级所有依赖到最新版本（会修改 package.json 与 pnpm-lock.yaml）。建议先在分支/CI上测试再在生产运行。"
+  # 尝试升级（如果失败也继续安装现有版本）
+  pnpm up --latest --recursive || echo "pnpm up 失败，继续进行安装（使用当前 lockfile）"
+  pnpm install || pnpm install --shamefully-hoist
+else
+  # 优先使用 frozen lockfile 保持可重复性，否则允许更新锁文件
+  pnpm install --frozen-lockfile || pnpm install
+fi
 
 cd packages/api
 
