@@ -59,7 +59,7 @@ fi
 # 1. 拉取最新代码（如用 git）
 if [ -d .git ]; then
   echo "拉取最新代码..."
-  git pull origin main
+  git pull origin master
 fi
 
 # 2. 安装依赖
