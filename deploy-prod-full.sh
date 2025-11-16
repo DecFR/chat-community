@@ -7,14 +7,17 @@ if [ "$EUID" -eq 0 ]; then
     SVC_USER="chat-svc"
     echo "未输入，默认使用 chat-svc。"
   fi
-  if ! id "$SVC_USER" &>/dev/null; then
-    adduser --system --group "$SVC_USER"
-    echo "$SVC_USER ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$SVC_USER
-    chmod 440 /etc/sudoers.d/$SVC_USER
-    echo "已创建服务用户 $SVC_USER 并配置免密 sudo。"
-  else
-    echo "服务用户 $SVC_USER 已存在，跳过创建。"
+  if id "$SVC_USER" &>/dev/null; then
+    echo "检测到同名用户 $SVC_USER，正在删除..."
+    userdel -r "$SVC_USER" 2>/dev/null || true
+    rm -rf "/home/$SVC_USER"
+    rm -f "/etc/sudoers.d/$SVC_USER"
+    echo "已删除旧用户 $SVC_USER。"
   fi
+  useradd -m -s /bin/bash "$SVC_USER"
+  echo "$SVC_USER ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$SVC_USER
+  chmod 440 /etc/sudoers.d/$SVC_USER
+  echo "已创建服务用户 $SVC_USER（带家目录和 bash shell）并配置免密 sudo。"
   echo "请用如下命令切换到服务用户并重新运行本脚本："
   echo "sudo -iu $SVC_USER"
   exit 0
