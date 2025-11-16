@@ -131,9 +131,9 @@ fi
 cd packages/api
 if [ -d "prisma/migrations" ]; then
   echo "生成 Prisma 客户端..."
-  pnpm prisma generate
+  $SUDO pnpm prisma generate
   echo "执行数据库迁移..."
-  pnpm prisma migrate deploy || echo "数据库迁移失败，请检查。"
+  $SUDO pnpm prisma migrate deploy || echo "数据库迁移失败，请检查。"
 fi
 cd ../..
 
