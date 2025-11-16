@@ -17,9 +17,52 @@ read -p "Branch to deploy [${DEFAULT_BRANCH}]: " BRANCH
 BRANCH=${BRANCH:-$DEFAULT_BRANCH}
 read -p "Domain for site (leave empty to skip nginx/certbot): " DOMAIN
 
+# 如果以 root 运行，提示可自动创建一个带 sudo 权限的普通用户并复制 SSH 公钥。
+# 脚本默认不推荐以 root 直接运行；创建用户后会自动切换为该用户并继续执行脚本。
+NEW_USER="DecFR"
+SCRIPTPATH="$(pwd)"
 if [ "$EUID" -eq 0 ]; then
-  echo "请不要以 root 用户运行此脚本。使用普通用户并具有 sudo 权限。"
-  exit 1
+  echo "检测到以 root 身份运行脚本。脚本建议使用非 root 用户运行（带 sudo 权限）。"
+  read -p "是否创建用户 '$NEW_USER' 并配置 sudo 与 SSH 公钥，然后以该用户继续执行脚本？ (Y/n): " CREATE_USER
+  CREATE_USER=${CREATE_USER:-Y}
+  if [ "$CREATE_USER" = "Y" ] || [ "$CREATE_USER" = "y" ]; then
+    if id -u "$NEW_USER" >/dev/null 2>&1; then
+      echo "用户 '$NEW_USER' 已存在。跳过创建步骤。"
+    else
+      echo "正在创建用户 '$NEW_USER'..."
+      if ! useradd -m -s /bin/bash "$NEW_USER" >/dev/null 2>&1; then
+        echo "useradd 失败，尝试使用 adduser 备选方式..."
+        adduser --disabled-password --gecos "" "$NEW_USER" || true
+      fi
+      passwd -d "$NEW_USER" >/dev/null 2>&1 || true
+      usermod -aG sudo "$NEW_USER" || true
+
+      SSH_DIR="/home/$NEW_USER/.ssh"
+      mkdir -p "$SSH_DIR"
+      chown "$NEW_USER":"$NEW_USER" "$SSH_DIR"
+      chmod 700 "$SSH_DIR"
+      if [ -f /root/.ssh/authorized_keys ]; then
+        cp /root/.ssh/authorized_keys "$SSH_DIR/authorized_keys"
+        chown "$NEW_USER":"$NEW_USER" "$SSH_DIR/authorized_keys"
+        chmod 600 "$SSH_DIR/authorized_keys"
+        echo "已复制 root 的 SSH 公钥到 $SSH_DIR/authorized_keys"
+      else
+        echo "未找到 /root/.ssh/authorized_keys；请手动将公钥追加到 $SSH_DIR/authorized_keys"
+      fi
+    fi
+
+    echo "确保脚本目录 $SCRIPTPATH 对新用户可读写（将 chown 给 $NEW_USER）..."
+    chown -R "$NEW_USER":"$NEW_USER" "$SCRIPTPATH" || true
+
+    echo "现在以用户 '$NEW_USER' 继续执行脚本（会在子进程中运行）。"
+    su - "$NEW_USER" -c "cd '$SCRIPTPATH' && bash deploy_ubuntu.sh"
+    EXIT_CODE=$?
+    echo "以 $NEW_USER 运行后退出，返回码: $EXIT_CODE"
+    exit $EXIT_CODE
+  else
+    echo "未创建用户，退出。请以非 root 用户运行此脚本。"
+    exit 1
+  fi
 fi
 
 echo "部署配置： repo=${REPO_URL} branch=${BRANCH} domain=${DOMAIN}"
