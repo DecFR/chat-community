@@ -1,9 +1,14 @@
+
 import path from 'path';
 import fs from 'fs';
 import { Router } from 'express';
 import multer from 'multer';
 import { nanoid } from 'nanoid';
 import { authMiddleware } from '../middleware/auth.js';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const router: Router = Router();
 const UPLOAD_DIR = path.resolve(__dirname, '../../uploads');

@@ -268,7 +268,7 @@ fi
 pm2 status
 
 # 9. 日志查看
-pm2 logs chat-api
+# pm2 logs chat-api
 
 # 10. 备份数据库与 .env 文件，定期维护
 
