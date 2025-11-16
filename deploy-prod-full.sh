@@ -257,6 +257,12 @@ $SUDO chmod -R 755 packages/api/uploads
 # 6. 启动后端服务（使用 pm2 管理）
 echo "启动后端服务..."
 cd packages/api
+# 自动检测构建产物 dist/server.js 是否存在
+if [ ! -f dist/server.js ]; then
+  echo "[错误] 构建产物 dist/server.js 不存在，后端无法启动！请检查 pnpm build 输出。"
+  cd ../..
+  exit 1
+fi
 $SUDO pm2 restart chat-api || $SUDO pm2 start dist/server.js --name chat-api --update-env
 cd ../..
 cd packages/client
