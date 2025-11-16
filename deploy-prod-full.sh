@@ -247,10 +247,21 @@ fi
 # 无论 .env 是新生成还是已存在，统一自动同步数据库密码
 if [ -f packages/api/.env ]; then
   $SUDO chmod 600 packages/api/.env 2>/dev/null || true
-  DB_URL=$(grep '^DATABASE_URL=' packages/api/.env | cut -d'=' -f2 | tr -d '"')
-  DB_PASS=$(echo "$DB_URL" | sed -n 's|postgresql://postgres:\([^@]*\)@.*|\1|p')
-  if [ -n "$DB_PASS" ]; then
-    $SUDO -u postgres psql -c "ALTER USER postgres WITH PASSWORD '$DB_PASS';" || echo "数据库密码同步失败，请检查 PostgreSQL 状态。"
+  # 检查 PostgreSQL 是否已安装
+  if command -v psql >/dev/null 2>&1; then
+    # 确保 PostgreSQL 服务正在运行
+    if ! $SUDO systemctl is-active --quiet postgresql; then
+      echo "PostgreSQL 服务未运行，正在启动..."
+      $SUDO systemctl start postgresql
+    fi
+    DB_URL=$(grep '^DATABASE_URL=' packages/api/.env | cut -d'=' -f2 | tr -d '"')
+    DB_PASS=$(echo "$DB_URL" | sed -n 's|postgresql://postgres:\([^@]*\)@.*|\1|p')
+    if [ -n "$DB_PASS" ]; then
+      echo "同步数据库密码..."
+      $SUDO -u postgres psql -c "ALTER USER postgres WITH PASSWORD '$DB_PASS';" || echo "数据库密码同步失败，请检查 PostgreSQL 状态。"
+    fi
+  else
+    echo "PostgreSQL 未安装，跳过数据库密码同步。"
   fi
 fi
 if [ ! -f packages/client/.env ]; then
@@ -268,8 +279,12 @@ EOF
 fi
 
 # 4. 初始化数据库（首次部署需执行）
-echo "初始化数据库..."
-$SUDO pnpm run setup:db
+if command -v psql >/dev/null 2>&1; then
+  echo "初始化数据库..."
+  $SUDO pnpm run setup:db
+else
+  echo "PostgreSQL 未安装，跳过数据库初始化。"
+fi
 
 # 5. 构建前后端
 echo "构建前后端..."
