@@ -693,26 +693,20 @@ function deploy_to_system() {
     $SUDO chmod 644 "$DEST_ROOT/chat-community.service" || true
   fi
 
-  # 创建运行用户
-  if ! id -u chatcomm >/dev/null 2>&1; then
-    $SUDO useradd --system --no-create-home --shell /usr/sbin/nologin chatcomm || true
-  fi
-  $SUDO chown -R chatcomm:chatcomm "$DEST_ROOT"
-
-  # 确保 API .env 权限属于 chatcomm 并设置为 600
+  # 不再创建或强制使用 chatcomm 用户。保留文件属主不变（如果需要，操作系统用户请用 sudo）
+  # 仅确保 .env 权限为 600（不修改属主）
   if [ -f "$DEST_ROOT/api/.env" ]; then
-    $SUDO chown chatcomm:chatcomm "$DEST_ROOT/api/.env" || true
     $SUDO chmod 600 "$DEST_ROOT/api/.env" || true
   fi
 
   # 安装生产依赖：直接在目标 api 目录下为生产环境安装依赖
   if [ -f "$DEST_ROOT/api/package.json" ]; then
     if command -v pnpm >/dev/null 2>&1; then
-      echo "使用 pnpm 安装生产依赖（以 chatcomm 用户）"
-      run_cmd_noexit $SUDO -u chatcomm bash -lc "cd '$DEST_ROOT/api' && pnpm install --prod --frozen-lockfile || pnpm install --prod" || true
+      echo "使用 pnpm 安装生产依赖（按当前用户/使用 sudo，如果需要）"
+      run_cmd_noexit $SUDO bash -lc "cd '$DEST_ROOT/api' && pnpm install --prod --frozen-lockfile || pnpm install --prod" || true
     else
-      echo "pnpm 未安装，尝试使用 npm 安装生产依赖（以 chatcomm 用户）"
-      run_cmd_noexit $SUDO -u chatcomm bash -lc "cd '$DEST_ROOT/api' && npm ci --only=production || true" || true
+      echo "pnpm 未安装，尝试使用 npm 安装生产依赖（按当前用户/使用 sudo，如果需要）"
+      run_cmd_noexit $SUDO bash -lc "cd '$DEST_ROOT/api' && npm ci --only=production || true" || true
     fi
   fi
 
@@ -725,7 +719,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=chatcomm
+# 不指定 User: 允许 systemd 使用 root（或单位被哪个用户启动就以哪个用户运行）
 WorkingDirectory=$DEST_ROOT/api
 ExecStart=$NODE_BIN $DEST_ROOT/api/dist/server.js
 Restart=on-failure

@@ -89,7 +89,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=chatcomm
+# 不指定 User，允许 systemd 在 root（或 unit 被哪个用户启动就以哪个用户运行）下执行
 ExecStart=/opt/chat-community/bin/monitor.sh check
 Nice=10
 
