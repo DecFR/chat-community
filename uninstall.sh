@@ -28,8 +28,22 @@ echo "Removing systemd unit..."
 $SUDO rm -f /etc/systemd/system/chat-community.service || true
 $SUDO systemctl daemon-reload || true
 
+# Remove systemd drop-in that loads .env (if present)
+DROPIN_DIR="/etc/systemd/system/chat-community.service.d"
+if [ -d "$DROPIN_DIR" ]; then
+  echo "Removing systemd drop-in: $DROPIN_DIR"
+  $SUDO rm -rf "$DROPIN_DIR" || true
+  $SUDO systemctl daemon-reload || true
+fi
+
 echo "Removing deployment directory /opt/chat-community ..."
 $SUDO rm -rf /opt/chat-community || true
+
+# Remove possible pnpm-created .prisma symlink inside deployed api (hotfix)
+if [ -L "/opt/chat-community/api/node_modules/.prisma" ] || [ -d "/opt/chat-community/api/node_modules/.prisma" ]; then
+  echo "Removing node_modules/.prisma under deployment (if exists)"
+  $SUDO rm -rf /opt/chat-community/api/node_modules/.prisma || true
+fi
 
 echo "Removing nginx site configuration (if exists)..."
 if [ -f /etc/nginx/sites-available/chat-community ]; then
@@ -65,6 +79,18 @@ resp2=${resp2:-N}
 if [[ "$resp2" =~ ^[Yy] ]]; then
   $SUDO userdel chatcomm 2>/dev/null || true
   echo "chatcomm removed (if existed)."
+fi
+
+# Optionally drop Postgres database and role (destructive)
+read -r -p "Drop Postgres database 'chat_community_prod' and role 'chat_community'? This is destructive. [y/N]: " dropdb || true
+dropdb=${dropdb:-N}
+if [[ "$dropdb" =~ ^[Yy] ]]; then
+  echo "Dropping database and role..."
+  $SUDO -u postgres psql -v ON_ERROR_STOP=1 <<'PSQL'
+DROP DATABASE IF EXISTS chat_community_prod;
+DROP ROLE IF EXISTS chat_community;
+PSQL
+  echo "Postgres database and role dropped (if existed)."
 fi
 
 echo "Uninstall complete. Review logs or leftover files if any." 
