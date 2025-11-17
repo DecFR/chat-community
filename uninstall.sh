@@ -12,6 +12,20 @@ if [ "$EUID" -ne 0 ]; then
   fi
 fi
 
+# 参数解析：支持 --full|-f 完全清理（包含 PostgreSQL 软件与数据），以及 --yes|-y 跳过交互
+FULL=0
+AUTO_YES=0
+for arg in "$@"; do
+  case "$arg" in
+    --full|-f)
+      FULL=1
+      ;;
+    --yes|-y)
+      AUTO_YES=1
+      ;;
+  esac
+done
+
 echo "WARNING: This will remove the deployed Chat-Community installation and its systemd unit."
 read -r -p "Continue and remove /opt/chat-community and systemd unit? [y/N]: " resp || true
 resp=${resp:-N}
@@ -82,15 +96,91 @@ if [[ "$resp2" =~ ^[Yy] ]]; then
 fi
 
 # Optionally drop Postgres database and role (destructive)
-read -r -p "Drop Postgres database 'chat_community_prod' and role 'chat_community'? This is destructive. [y/N]: " dropdb || true
+read -r -p "Drop Postgres database 'chat_community' and role 'postgres'? This is destructive. [y/N]: " dropdb || true
 dropdb=${dropdb:-N}
-if [[ "$dropdb" =~ ^[Yy] ]]; then
-  echo "Dropping database and role..."
-  $SUDO -u postgres psql -v ON_ERROR_STOP=1 <<'PSQL'
-DROP DATABASE IF EXISTS chat_community_prod;
-DROP ROLE IF EXISTS chat_community;
-PSQL
-  echo "Postgres database and role dropped (if existed)."
+if [[ "${dropdb}" =~ ^[Yy] ]]; then
+  echo "Dropping database 'chat_community'. For safety, the role 'postgres' will NOT be dropped automatically."
+  DB_NAME="chat_community"
+  ROLE_NAME="postgres"
+
+  # Drop database (safe to drop the application database)
+  $SUDO -u postgres psql -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS \"${DB_NAME}\";" || true
+
+  # Do NOT drop the built-in 'postgres' superuser role automatically.
+  if [ "${ROLE_NAME}" != "postgres" ]; then
+    $SUDO -u postgres psql -v ON_ERROR_STOP=1 -c "DROP ROLE IF EXISTS \"${ROLE_NAME}\";" || true
+    echo "Role ${ROLE_NAME} dropped (if existed)."
+  else
+    echo "Skipped dropping role 'postgres' for safety."
+    echo "If you really want to remove the role, run as postgres/root: psql -c \"DROP ROLE IF EXISTS postgres;\""
+  fi
+
+  echo "Postgres database and (optionally) role removal completed (if existed)."
+fi
+
+# 如果传入 --full，则执行彻底清理：卸载 PostgreSQL 包、删除数据目录、移除 nginx/nodejs/pnpm、并尝试删除 postgres 系统用户（非常破坏性）
+if [ "$FULL" -eq 1 ]; then
+  echo
+  echo "FULL purge requested (--full): 将删除 PostgreSQL 包、数据库数据目录、nginx、Node/pnpm，以及 postgres 系统用户（不可逆）。"
+  if [ "$AUTO_YES" -eq 0 ]; then
+    read -r -p "这是不可逆的操作！请输入大写 DELETE 以确认继续：" CONFIRM || true
+  else
+    CONFIRM=DELETE
+  fi
+
+  if [ "${CONFIRM}" != "DELETE" ]; then
+    echo "Full purge 已取消。"
+  else
+    echo "Proceeding with full purge..."
+
+    # 在尝试停止服务和卸载软件之前，先尝试以 postgres 用户删除角色（若 Postgres 可用）
+    if command -v psql >/dev/null 2>&1; then
+      echo "尝试删除 PostgreSQL role 'postgres'（若存在）。"
+      $SUDO -u postgres psql -v ON_ERROR_STOP=1 -c "DROP ROLE IF EXISTS postgres;" || true
+    fi
+
+    # 停止并卸载相关软件（根据包管理器选择）
+    if command -v apt-get >/dev/null 2>&1; then
+      echo "检测到 apt，停止并卸载 PostgreSQL/nginx/nodejs 类包（apt）。"
+      $SUDO systemctl stop postgresql postgresql-18 || true
+      $SUDO systemctl disable postgresql postgresql-18 || true
+      # 移除 PostgreSQL 相关包（通配符），并清理自动安装的依赖
+      $SUDO apt-get remove --purge -y 'postgresql*' postgresql-client-* postgresql-18* || true
+      $SUDO apt-get remove --purge -y nginx nginx-common || true
+      $SUDO apt-get remove --purge -y nodejs || true
+      $SUDO apt-get autoremove -y || true
+      $SUDO apt-get purge -y || true
+
+      # 清理 apt 中的 PGDG repository（若已添加）
+      $SUDO rm -f /etc/apt/sources.list.d/pgdg.list || true
+      $SUDO rm -f /etc/apt/keyrings/pgdg.gpg || true
+
+    elif command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
+      PKG_MGR=$(command -v dnf >/dev/null 2>&1 && echo dnf || echo yum)
+      echo "检测到 $PKG_MGR，尝试停止并移除 PostgreSQL/nginx/nodejs 包。"
+      $SUDO systemctl stop postgresql-18 || true
+      $SUDO $PKG_MGR remove -y postgresql\\* postgresql18\\* || true
+      $SUDO $PKG_MGR remove -y nginx nodejs || true
+      $SUDO $PKG_MGR autoremove -y || true
+      $SUDO rm -f /etc/yum.repos.d/pgdg* || true
+    else
+      echo "未识别包管理器，跳过自动卸载软件包步骤。请手动移除 PostgreSQL/nginx/nodejs。"
+    fi
+
+    # 删除可能的 Postgres 数据目录与配置
+    echo "删除 PostgreSQL 数据目录与配置..."
+    $SUDO rm -rf /var/lib/postgresql /var/lib/pgsql /etc/postgresql /var/log/postgresql || true
+
+    # 删除 pnpm 可执行文件（若存在）
+    echo "删除全局 pnpm 可执行文件（若存在）..."
+    $SUDO rm -f /usr/bin/pnpm /usr/local/bin/pnpm /usr/bin/corepack || true
+
+    # 尝试删除 postgres 系统用户（非常破坏性）
+    echo "尝试移除系统用户 'postgres'（如存在）..."
+    $SUDO userdel -r postgres 2>/dev/null || true
+
+    echo "Full purge 完成（请检查是否有残留配置或包，根据需要手动清理）。"
+  fi
 fi
 
 echo "Uninstall complete. Review logs or leftover files if any." 
