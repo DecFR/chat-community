@@ -419,12 +419,3 @@ nginx -t && systemctl reload nginx
 
 --------------------
 
-需要我为你做的可选项：
-- 生成 `systemd` 单元文件并提交到仓库（示例）
-- 生成 `nginx` 配置文件模板并提交
-- 根据你的域名/路径生成并填充 `/etc/chat-community/api.env` 样例
-
-告诉我你要我继续做哪一项，我会把对应文件直接添加到仓库或把内容拷贝给你。
-
----
-文件：`DEPLOY_MANUAL.md` 生成于仓库根。
