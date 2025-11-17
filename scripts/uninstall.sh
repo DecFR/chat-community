@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Uninstall script for Chat-Community (Linux)
 # - Stops and disables systemd service `chat-community-api.service` (if exists)
-# - Optionally stops pm2 app `chat-api`
 # - Removes nginx site config `chat-community.conf` and reloads nginx
 # - Removes front-end static files (default `/var/www/chat-community/client`)
 # - Optionally drops Postgres database and user (must have psql access)
@@ -97,18 +96,7 @@ else
   echo "No systemd unit found for chat-community-api, skipping service stop." 
 fi
 
-# 2) If pm2 is present, try to stop the process named 'chat-api' or 'chat-community'
-if command -v pm2 >/dev/null 2>&1; then
-  echo "pm2 detected. Checking for chat-api process..."
-  if pm2 list | grep -E "chat-api|chat-community" >/dev/null 2>&1; then
-    confirm_or_die "Stop and delete pm2 process 'chat-api' (if present)?"
-    run_or_echo "pm2 stop chat-api || true"
-    run_or_echo "pm2 delete chat-api || true"
-    run_or_echo "pm2 save || true"
-  else
-    echo "No pm2 app named 'chat-api' found."
-  fi
-fi
+# (无需处理 pm2 — 如未使用，脚本不会尝试操作 pm2)
 
 # 3) Nginx site removal
 NGINX_AVAILABLE="/etc/nginx/sites-available/chat-community.conf"
