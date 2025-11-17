@@ -6,8 +6,8 @@ SERVICE_NAME="chat-community"
 MONITOR_USER=${MONITOR_USER:-chatcomm}
 API_PORT=${PROXY_PORT:-3000}
 API_HOST=${API_HOST:-127.0.0.1}
-DB_NAME=${DB_NAME:-chat_community_prod}
-DB_USER=${DB_USER:-chat_community}
+DB_NAME=${DB_NAME:-chat_community}
+DB_USER=${DB_USER:-postgres}
 
 function fail() { echo "ERROR: $*" >&2; exit 2; }
 
@@ -48,11 +48,11 @@ function check_api_http() {
 
 function check_db() {
   if command -v psql >/dev/null 2>&1; then
-    if sudo -u postgres psql -d "$DB_NAME" -c 'SELECT 1' -tA >/dev/null 2>&1; then
-      echo "OK: Postgres reachable ($DB_NAME)"
+    if sudo -u "$DB_USER" psql -d "$DB_NAME" -c 'SELECT 1' -tA >/dev/null 2>&1; then
+      echo "OK: Postgres reachable ($DB_NAME) as $DB_USER"
       return 0
     else
-      echo "FAIL: Postgres cannot connect to $DB_NAME as postgres user"
+      echo "FAIL: Postgres cannot connect to $DB_NAME as $DB_USER user"
       return 1
     fi
   else

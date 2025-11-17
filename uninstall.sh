@@ -27,8 +27,12 @@ for arg in "$@"; do
 done
 
 echo "WARNING: This will remove the deployed Chat-Community installation and its systemd unit."
-read -r -p "Continue and remove /opt/chat-community and systemd unit? [y/N]: " resp || true
-resp=${resp:-N}
+if [ "$AUTO_YES" -eq 1 ]; then
+  resp=Y
+else
+  read -r -p "Continue and remove /opt/chat-community and systemd unit? [y/N]: " resp || true
+  resp=${resp:-N}
+fi
 if [[ ! "$resp" =~ ^[Yy] ]]; then
   echo "Aborted. No changes made."
   exit 0
@@ -88,16 +92,24 @@ $SUDO systemctl daemon-reload || true
 $SUDO rm -f /opt/chat-community/bin/monitor.sh || true
 
 echo "Optionally remove system user 'chatcomm'."
-read -r -p "Remove user chatcomm? [y/N]: " resp2 || true
-resp2=${resp2:-N}
+if [ "$AUTO_YES" -eq 1 ]; then
+  resp2=Y
+else
+  read -r -p "Remove user chatcomm? [y/N]: " resp2 || true
+  resp2=${resp2:-N}
+fi
 if [[ "$resp2" =~ ^[Yy] ]]; then
   $SUDO userdel chatcomm 2>/dev/null || true
   echo "chatcomm removed (if existed)."
 fi
 
 # Optionally drop Postgres database and role (destructive)
-read -r -p "Drop Postgres database 'chat_community' and role 'postgres'? This is destructive. [y/N]: " dropdb || true
-dropdb=${dropdb:-N}
+if [ "$AUTO_YES" -eq 1 ]; then
+  dropdb=Y
+else
+  read -r -p "Drop Postgres database 'chat_community' and role 'postgres'? This is destructive. [y/N]: " dropdb || true
+  dropdb=${dropdb:-N}
+fi
 if [[ "${dropdb}" =~ ^[Yy] ]]; then
   echo "Dropping database 'chat_community'. For safety, the role 'postgres' will NOT be dropped automatically."
   DB_NAME="chat_community"
@@ -144,6 +156,15 @@ if [ "$FULL" -eq 1 ]; then
       echo "检测到 apt，停止并卸载 PostgreSQL/nginx/nodejs 类包（apt）。"
       $SUDO systemctl stop postgresql postgresql-18 || true
       $SUDO systemctl disable postgresql postgresql-18 || true
+      # 若存在全局 node_modules（如 /usr/lib/node_modules 或 /usr/local/lib/node_modules），在删除 nodejs 前进行清理
+      if [ -d /usr/lib/node_modules ] || [ -d /usr/local/lib/node_modules ]; then
+        echo "清理全局 node_modules，以避免 dpkg 在删除 nodejs 时提示目录非空..."
+        $SUDO rm -rf /usr/lib/node_modules/* 2>/dev/null || true
+        $SUDO rm -rf /usr/local/lib/node_modules/* 2>/dev/null || true
+        # 尝试移除空目录（如果安全）
+        $SUDO rmdir /usr/lib/node_modules 2>/dev/null || true
+        $SUDO rmdir /usr/local/lib/node_modules 2>/dev/null || true
+      fi
       # 移除 PostgreSQL 相关包（通配符），并清理自动安装的依赖
       $SUDO apt-get remove --purge -y 'postgresql*' postgresql-client-* postgresql-18* || true
       $SUDO apt-get remove --purge -y nginx nginx-common || true

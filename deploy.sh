@@ -2,9 +2,12 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DEPLOY_DIR="$ROOT_DIR/deploy_package"
 API_PKG="$ROOT_DIR/packages/api"
 CLIENT_PKG="$ROOT_DIR/packages/client"
+
+# Logging
+LOG_DIR="/var/log/chat-community"
+LOG_FILE="$LOG_DIR/deploy.log"
 
 SUDO=""
 if [ "$EUID" -ne 0 ]; then
@@ -24,9 +27,67 @@ for arg in "$@"; do
   esac
 done
 
-echo "== Chat-Community 一键构建、环境安装与打包脚本 =="
+echo "== Chat-Community 一键构建、环境安装脚本 =="
 
-function fail() { echo "ERROR: $*" >&2; exit 1; }
+function fail() {
+  echo "ERROR: $*" >&2
+  if [ -n "${LOG_FILE:-}" ]; then
+    # ensure log dir exists for writing
+    if [ -n "${SUDO:-}" ]; then
+      $SUDO mkdir -p "$LOG_DIR" 2>/dev/null || true
+      $SUDO touch "$LOG_FILE" 2>/dev/null || true
+    else
+      mkdir -p "$LOG_DIR" 2>/dev/null || true
+      touch "$LOG_FILE" 2>/dev/null || true
+    fi
+    echo "$(date +"%Y-%m-%dT%H:%M:%S%z") ERROR: $*" >> "$LOG_FILE" 2>/dev/null || true
+    echo "详细日志请见: $LOG_FILE" >&2
+  fi
+  exit 1
+}
+
+function ensure_log_dir() {
+  if [ -n "${SUDO:-}" ]; then
+    $SUDO mkdir -p "$LOG_DIR" || true
+    $SUDO chmod 0755 "$LOG_DIR" || true
+    $SUDO touch "$LOG_FILE" || true
+    $SUDO chmod 0644 "$LOG_FILE" || true
+  else
+    mkdir -p "$LOG_DIR" || true
+    chmod 0755 "$LOG_DIR" || true
+    touch "$LOG_FILE" || true
+    chmod 0644 "$LOG_FILE" || true
+  fi
+}
+
+function run_cmd() {
+  # run a command, log stdout/stderr to LOG_FILE, and fail on non-zero exit
+  echo "[$(date +"%Y-%m-%dT%H:%M:%S%z")] CMD: $*" | tee -a "$LOG_FILE"
+  if ! "$@" 2>&1 | tee -a "$LOG_FILE"; then
+    echo "[$(date +"%Y-%m-%dT%H:%M:%S%z")] FAILED: $*" | tee -a "$LOG_FILE"
+    fail "Command failed: $* (see $LOG_FILE)"
+  else
+    echo "[$(date +"%Y-%m-%dT%H:%M:%S%z")] OK: $*" >> "$LOG_FILE"
+  fi
+}
+
+function run_cmd_noexit() {
+  # run a command, log stdout/stderr to LOG_FILE, but do NOT call fail on non-zero exit
+  echo "[$(date +"%Y-%m-%dT%H:%M:%S%z")] CMD: $*" | tee -a "$LOG_FILE"
+  if ! "$@" 2>&1 | tee -a "$LOG_FILE"; then
+    echo "[$(date +"%Y-%m-%dT%H:%M:%S%z")] NON-ZERO EXIT: $*" >> "$LOG_FILE"
+    return 1
+  else
+    echo "[$(date +"%Y-%m-%dT%H:%M:%S%z")] OK: $*" >> "$LOG_FILE"
+    return 0
+  fi
+}
+
+# prepare log directory immediately
+ensure_log_dir
+
+# trap unexpected errors to log file
+trap 'echo "[$(date +"%Y-%m-%dT%H:%M:%S%z")] Unexpected error at line $LINENO" | tee -a "$LOG_FILE"; exit 1' ERR
 
 function detect_distro() {
   if [ -f /etc/os-release ]; then
@@ -55,10 +116,10 @@ function install_prereqs() {
   PM="$(pkg_mgr)"
   echo "安装基础工具（curl、wget、ca-certificates、gnupg） via: $PM"
   if [ "$PM" = "apt" ]; then
-    $SUDO apt-get update
-    $SUDO apt-get install -y curl wget ca-certificates gnupg lsb-release build-essential
+    run_cmd $SUDO apt-get update
+    run_cmd $SUDO apt-get install -y curl wget ca-certificates gnupg lsb-release build-essential
   elif [ "$PM" = "dnf" ] || [ "$PM" = "yum" ]; then
-    $SUDO ${PM} install -y curl wget ca-certificates gnupg2 tar gzip make gcc
+    run_cmd $SUDO ${PM} install -y curl wget ca-certificates gnupg2 tar gzip make gcc
   else
     echo "未识别的包管理程序，请手动安装 curl/wget/ca-certificates/gnupg/build-essential 等依赖。"
   fi
@@ -72,11 +133,11 @@ function install_node22() {
     echo "检测到 node $(node -v)" 
   fi
   if [ "$PM" = "apt" ]; then
-    curl -fsSL https://deb.nodesource.com/setup_22.x | $SUDO bash -
-    $SUDO apt-get install -y nodejs
+    run_cmd bash -lc "curl -fsSL https://deb.nodesource.com/setup_22.x | $SUDO bash -"
+    run_cmd $SUDO apt-get install -y nodejs
   elif [ "$PM" = "dnf" ] || [ "$PM" = "yum" ]; then
-    curl -fsSL https://rpm.nodesource.com/setup_22.x | $SUDO bash -
-    $SUDO ${PM} install -y nodejs
+    run_cmd bash -lc "curl -fsSL https://rpm.nodesource.com/setup_22.x | $SUDO bash -"
+    run_cmd $SUDO ${PM} install -y nodejs
   else
     echo "无法自动安装 Node.js：不支持的包管理器。请手动安装 Node 22 LTS。"
   fi
@@ -90,24 +151,24 @@ function install_postgres18() {
   fi
   if [ "$PM" = "apt" ]; then
     # Debian/Ubuntu 使用 PGDG
-    $SUDO mkdir -p /etc/apt/keyrings
-    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | $SUDO gpg --dearmor -o /etc/apt/keyrings/pgdg.gpg
+    run_cmd $SUDO mkdir -p /etc/apt/keyrings
+    run_cmd bash -lc "curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | $SUDO gpg --dearmor -o /etc/apt/keyrings/pgdg.gpg"
     CODENAME=$(lsb_release -cs || echo "$(awk -F= '/^VERSION_CODENAME/{print $2}' /etc/os-release || echo '')")
     if [ -z "$CODENAME" ]; then
       CODENAME="$(grep VERSION_CODENAME /etc/os-release || true | cut -d= -f2)"
     fi
-    echo "deb [signed-by=/etc/apt/keyrings/pgdg.gpg] http://apt.postgresql.org/pub/repos/apt/ ${CODENAME}-pgdg main" | $SUDO tee /etc/apt/sources.list.d/pgdg.list
-    $SUDO apt-get update
-    $SUDO apt-get install -y postgresql-18
-    $SUDO systemctl enable --now postgresql
+    run_cmd bash -lc "echo \"deb [signed-by=/etc/apt/keyrings/pgdg.gpg] http://apt.postgresql.org/pub/repos/apt/ ${CODENAME}-pgdg main\" | $SUDO tee /etc/apt/sources.list.d/pgdg.list"
+    run_cmd $SUDO apt-get update
+    run_cmd $SUDO apt-get install -y postgresql-18
+    run_cmd $SUDO systemctl enable --now postgresql
   elif [ "$PM" = "dnf" ] || [ "$PM" = "yum" ]; then
     # RedHat/CentOS/Fedora
-    $SUDO ${PM} install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-$(rpm -E '%{?rhel}0')-$(uname -m)/pgdg-redhat-repo-latest.noarch.rpm || true
+    run_cmd bash -lc "$SUDO ${PM} install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-$(rpm -E '%{?rhel}0')-$(uname -m)/pgdg-redhat-repo-latest.noarch.rpm || true"
     # disable builtin module and install
-    $SUDO ${PM} -y module disable postgresql || true
-    $SUDO ${PM} install -y postgresql18-server
-    $SUDO /usr/pgsql-18/bin/postgresql-18-setup initdb || true
-    $SUDO systemctl enable --now postgresql-18
+    run_cmd_noexit bash -lc "$SUDO ${PM} -y module disable postgresql || true"
+    run_cmd $SUDO ${PM} install -y postgresql18-server
+    run_cmd_noexit $SUDO /usr/pgsql-18/bin/postgresql-18-setup initdb
+    run_cmd $SUDO systemctl enable --now postgresql-18
   else
     echo "无法自动安装 PostgreSQL：不支持的包管理器。请手动安装 PostgreSQL 18。"
   fi
@@ -122,19 +183,19 @@ function ensure_pnpm_corepack() {
   if command -v corepack >/dev/null 2>&1; then
     echo "启用 corepack 并激活 pnpm"
     # 尝试启用 corepack，并激活 pnpm；若因旧的 /usr/bin/pnpm 冲突导致失败，尝试修复并重试
-    $SUDO corepack enable || true
-    if ! $SUDO corepack prepare pnpm@latest --activate >/dev/null 2>&1; then
-      echo "corepack prepare 失败，尝试移除已存在的 /usr/bin/pnpm 并重试..."
+    run_cmd_noexit $SUDO corepack enable || true
+    if ! run_cmd_noexit bash -lc "$SUDO corepack prepare pnpm@latest --activate >/dev/null 2>&1"; then
+      echo "corepack prepare 失败，尝试移除已存在的 /usr/bin/pnpm 并重试..." | tee -a "$LOG_FILE"
       if [ -e "/usr/bin/pnpm" ]; then
-        $SUDO rm -f /usr/bin/pnpm || true
-        echo "/usr/bin/pnpm 已移除，重试 corepack prepare"
-        $SUDO corepack prepare pnpm@latest --activate || true
+        run_cmd $SUDO rm -f /usr/bin/pnpm || true
+        echo "/usr/bin/pnpm 已移除，重试 corepack prepare" | tee -a "$LOG_FILE"
+        run_cmd_noexit bash -lc "$SUDO corepack prepare pnpm@latest --activate" || true
       fi
     fi
   else
     echo "尝试通过 npm 全局安装 pnpm"
     if command -v npm >/dev/null 2>&1; then
-      $SUDO npm i -g pnpm || true
+      run_cmd_noexit $SUDO npm i -g pnpm || true
     else
       echo "未检测到 npm，请先安装 Node.js 或手动安装 pnpm。"
     fi
@@ -181,153 +242,21 @@ function check_build_artifacts() {
 function build_all() {
   echo "安装依赖并构建（工作区）..."
   if [ -f "$ROOT_DIR/pnpm-lock.yaml" ]; then
-    pnpm install --frozen-lockfile
+    run_cmd pnpm install --frozen-lockfile
   else
-    pnpm install
+    run_cmd pnpm install
   fi
 
-  pnpm -r build
+  run_cmd pnpm -r build
 }
 
+# Ensure DEPLOY_DIR exists (minimal, since packaging was removed earlier)
 function prepare_deploy_dir() {
-  echo "准备发布目录： $DEPLOY_DIR"
-  rm -rf "$DEPLOY_DIR"
-  mkdir -p "$DEPLOY_DIR/api"
-  mkdir -p "$DEPLOY_DIR/client"
-
-  # copy client build
-  if [ -d "$CLIENT_PKG/dist" ]; then
-    cp -r "$CLIENT_PKG/dist" "$DEPLOY_DIR/client/dist"
-  else
-    fail "client 未构建出 dist（$CLIENT_PKG/dist 不存在）。请先确认构建成功。"
-  fi
-
-  # copy api build and runtime files
-  if [ -d "$API_PKG/dist" ]; then
-    cp -r "$API_PKG/dist" "$DEPLOY_DIR/api/dist"
-  else
-    fail "api 未构建出 dist（$API_PKG/dist 不存在）。请先确认构建成功。"
-  fi
-
-  cp "$API_PKG/package.json" "$DEPLOY_DIR/api/"
-  # 包含 prisma runtime/schema（若存在）
-  if [ -d "$API_PKG/prisma" ]; then
-    cp -r "$API_PKG/prisma" "$DEPLOY_DIR/api/prisma"
-  fi
-  # 包含上传目录（若存在），生产部署通常需要处理静态上传目录或使用外部文件存储
-  if [ -d "$API_PKG/../uploads" ]; then
-    mkdir -p "$DEPLOY_DIR/uploads"
-    cp -r "$API_PKG/../uploads" "$DEPLOY_DIR/uploads"
-  fi
-
-  # workspace lockfiles 有助于在目标机器上安装相同依赖
-  if [ -f "$ROOT_DIR/pnpm-lock.yaml" ]; then
-    cp "$ROOT_DIR/pnpm-lock.yaml" "$DEPLOY_DIR/"
-  fi
-  if [ -f "$ROOT_DIR/pnpm-workspace.yaml" ]; then
-    cp "$ROOT_DIR/pnpm-workspace.yaml" "$DEPLOY_DIR/"
-  fi
-
-  # 生成安装生产依赖脚本（放在包内，目标机器上执行）
-  cat > "$DEPLOY_DIR/install_prod_deps.sh" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-ROOT="$(cd "$(dirname "$0")" && pwd)"
-cd "$ROOT/api"
-if ! command -v pnpm >/dev/null 2>&1; then
-  if command -v corepack >/dev/null 2>&1; then
-    corepack enable || true
-    corepack prepare pnpm@latest --activate || true
-  else
-    echo "pnpm 未找到，请先在目标机器上安装 pnpm（例如： sudo npm i -g pnpm）。" >&2
-    exit 1
-  fi
-fi
-if [ -f "$ROOT/pnpm-lock.yaml" ]; then
-  pnpm install --prod --frozen-lockfile
-else
-  pnpm install --prod
-fi
-echo "生产依赖安装完成。"
-SH
-  chmod +x "$DEPLOY_DIR/install_prod_deps.sh"
-
-  # 将监控脚本与 systemd 单元加入发布包（若仓库中存在 monitor.sh，则包含）
-  if [ -f "$ROOT_DIR/monitor.sh" ]; then
-    cp "$ROOT_DIR/monitor.sh" "$DEPLOY_DIR/monitor.sh"
-    chmod +x "$DEPLOY_DIR/monitor.sh"
-
-    # 生成 systemd unit 与 timer 模板（与 monitor.sh 协同）
-    cat > "$DEPLOY_DIR/chat-community-monitor.service" <<'UNIT'
-[Unit]
-Description=Chat-Community Health Check
-After=network.target
-
-[Service]
-Type=simple
-User=chatcomm
-ExecStart=/opt/chat-community/bin/monitor.sh check
-Nice=10
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-
-    cat > "$DEPLOY_DIR/chat-community-monitor.timer" <<'TIMER'
-[Unit]
-Description=Run Chat-Community health check every 5 minutes
-
-[Timer]
-OnBootSec=2m
-OnUnitActiveSec=5min
-Unit=chat-community-monitor.service
-
-[Install]
-WantedBy=timers.target
-TIMER
-  fi
-
-  # 生成运行脚本示例
-  cat > "$DEPLOY_DIR/run_api.sh" <<'SH'
-#!/usr/bin/env bash
-set -euo pipefail
-ROOT="$(cd "$(dirname "$0")" && pwd)"
-cd "$ROOT/api"
-export NODE_ENV=production
-if [ -f ".env" ]; then
-  echo "使用本地 .env 文件（请确保已配置好数据库和 JWT 等）"
-fi
-node dist/server.js
-SH
-  chmod +x "$DEPLOY_DIR/run_api.sh"
-
-  # systemd 单元模板
-  cat > "$DEPLOY_DIR/chat-community.service" <<'UNIT'
-[Unit]
-Description=Chat-Community API
-After=network.target
-
-[Service]
-Type=simple
-WorkingDirectory=/opt/chat-community/api
-ExecStart=/usr/bin/node dist/server.js
-Restart=on-failure
-Environment=NODE_ENV=production
-# 环境变量可以放到 /opt/chat-community/api/.env
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-
-  # 高亮并增加间隔，便于在终端中辨识打包信息
-  echo
-  echo -e "\033[1;32m============================================================\033[0m"
-  echo -e "\033[1;32m 发布包准备完成：\033[0m  \033[1;36m$DEPLOY_DIR\033[0m"
-  echo -e "\033[1;33m 可使用 tar 打包：\033[0m"
-  echo -e "    \033[1;37m tar -czf chat-community-deploy.tar.gz -C $ROOT_DIR deploy_package\033[0m"
-  echo -e "\033[1;32m============================================================\033[0m"
-  echo
+  DEPLOY_DIR="$ROOT_DIR/deploy_tmp"
+  mkdir -p "$DEPLOY_DIR/api" "$DEPLOY_DIR/client" || true
 }
+
+ 
 
 ### 主流程
 detect_distro
@@ -376,8 +305,8 @@ function generate_env_file() {
   echo "生成或更新 API .env 配置..."
   ENV_PATH="$API_PKG/.env"
   DEPLOY_ENV_PATH="$DEPLOY_DIR/api/.env"
-  PG_USER="chat_community"
-  PG_DB="chat_community_prod"
+  PG_USER="postgres"
+  PG_DB="chat_community"
   PG_HOST="localhost"
   PG_PORT="5432"
 
@@ -473,14 +402,20 @@ function setup_postgres_db_and_user() {
     fi
   }
 
-  # 创建角色
-  exists=$(psql_query "SELECT 1 FROM pg_roles WHERE rolname='$PG_USER'" || echo "")
-  if [ "x$exists" = "x1" ]; then
-    echo "角色 $PG_USER 已存在，尝试更新密码。"
-    psql_exec "ALTER ROLE \"$PG_USER\" WITH LOGIN PASSWORD '$PG_PASSWORD';" || fail "无法更新角色密码"
+  # 如果使用 postgres 超级用户，则只更新其密码；否则创建或更新应用用户
+  if [ "$PG_USER" = "postgres" ]; then
+    echo "使用超级用户 'postgres'：尝试设置/更新 postgres 密码（如需要）。"
+    # 对 postgres 角色设置密码（若 postgres 用户不存在，此命令会失败）
+    psql_exec "ALTER ROLE \"postgres\" WITH LOGIN PASSWORD '$PG_PASSWORD';" || true
   else
-    echo "创建角色 $PG_USER"
-    psql_exec "CREATE ROLE \"$PG_USER\" WITH LOGIN PASSWORD '$PG_PASSWORD';" || fail "无法创建角色"
+    exists=$(psql_query "SELECT 1 FROM pg_roles WHERE rolname='$PG_USER'" || echo "")
+    if [ "x$exists" = "x1" ]; then
+      echo "角色 $PG_USER 已存在，尝试更新密码。"
+      psql_exec "ALTER ROLE \"$PG_USER\" WITH LOGIN PASSWORD '$PG_PASSWORD';" || fail "无法更新角色密码"
+    else
+      echo "创建角色 $PG_USER"
+      psql_exec "CREATE ROLE \"$PG_USER\" WITH LOGIN PASSWORD '$PG_PASSWORD';" || fail "无法创建角色"
+    fi
   fi
 
   # 创建数据库并设置拥有者
@@ -499,9 +434,9 @@ function install_nginx_and_config() {
   echo "安装并配置 nginx..."
   PM="$(pkg_mgr)"
   if [ "$PM" = "apt" ]; then
-    $SUDO apt-get install -y nginx
+    run_cmd $SUDO apt-get install -y nginx
   elif [ "$PM" = "dnf" ] || [ "$PM" = "yum" ]; then
-    $SUDO ${PM} install -y nginx
+    run_cmd $SUDO ${PM} install -y nginx
   else
     echo "请手动安装 nginx 并配置反向代理。"
     return 0
@@ -696,8 +631,8 @@ EX
     fi
   fi
 
-  $SUDO nginx -t || true
-  $SUDO systemctl enable --now nginx || true
+  run_cmd_noexit $SUDO nginx -t || true
+  run_cmd_noexit $SUDO systemctl enable --now nginx || true
   echo "若需手动修改 nginx 配置：编辑 /etc/nginx/sites-available/chat-community 和（如存在）/etc/nginx/sites-available/chat-community-ssl，然后运行："
   echo "  sudo nginx -t"
   echo "  sudo systemctl restart nginx"
@@ -717,36 +652,44 @@ function deploy_to_system() {
     $SUDO tar -czf "$BACKUP" -C "$(dirname "$DEST_ROOT")" "$(basename "$DEST_ROOT")" || true
   fi
 
-  # 清理旧文件并复制新文件
+  # 清理旧文件并复制新文件（直接从源码的构建产物复制）
   $SUDO rm -rf "$DEST_ROOT/api/*" "$DEST_ROOT/client/*" || true
-  $SUDO cp -r "$DEPLOY_DIR/api/"* "$DEST_ROOT/api/"
-  $SUDO cp -r "$DEPLOY_DIR/client/"* "$DEST_ROOT/client/"
+  if [ -d "$CLIENT_PKG/dist" ]; then
+    $SUDO cp -r "$CLIENT_PKG/dist/"* "$DEST_ROOT/client/"
+  else
+    echo "警告：未找到客户端构建产物 $CLIENT_PKG/dist，跳过复制客户端。"
+  fi
+  if [ -d "$API_PKG/dist" ]; then
+    $SUDO cp -r "$API_PKG/dist/"* "$DEST_ROOT/api/"
+  else
+    fail "api 未构建出 dist（$API_PKG/dist 不存在）。请先确认构建成功。"
+  fi
 
-  # 复制根级辅助脚本到目标（install/run/service 模板），方便在服务器上直接使用
-  if [ -f "$DEPLOY_DIR/install_prod_deps.sh" ]; then
-    $SUDO cp "$DEPLOY_DIR/install_prod_deps.sh" "$DEST_ROOT/"
-    $SUDO chmod 755 "$DEST_ROOT/install_prod_deps.sh" || true
-  fi
-  # 安装监控脚本与 systemd 单元（如果发布包包含）
-  if [ -f "$DEPLOY_DIR/monitor.sh" ]; then
-    echo "部署监控脚本到 $DEST_ROOT/bin"
-    $SUDO mkdir -p "$DEST_ROOT/bin"
-    $SUDO cp "$DEPLOY_DIR/monitor.sh" "$DEST_ROOT/bin/monitor.sh"
-    $SUDO chmod +x "$DEST_ROOT/bin/monitor.sh" || true
-  fi
-  if [ -f "$DEPLOY_DIR/chat-community-monitor.service" ] && [ -f "$DEPLOY_DIR/chat-community-monitor.timer" ]; then
-    echo "安装并启用监控 systemd 单元/定时器"
-    $SUDO mv "$DEPLOY_DIR/chat-community-monitor.service" /etc/systemd/system/chat-community-monitor.service || true
-    $SUDO mv "$DEPLOY_DIR/chat-community-monitor.timer" /etc/systemd/system/chat-community-monitor.timer || true
-    $SUDO systemctl daemon-reload || true
-    $SUDO systemctl enable --now chat-community-monitor.timer || true
-  fi
-  if [ -f "$DEPLOY_DIR/run_api.sh" ]; then
-    $SUDO cp "$DEPLOY_DIR/run_api.sh" "$DEST_ROOT/"
+  # 复制根级辅助脚本到目标（如仓库中存在 run_api.sh 等）
+  if [ -f "$ROOT_DIR/run_api.sh" ]; then
+    $SUDO cp "$ROOT_DIR/run_api.sh" "$DEST_ROOT/"
     $SUDO chmod 755 "$DEST_ROOT/run_api.sh" || true
   fi
-  if [ -f "$DEPLOY_DIR/chat-community.service" ]; then
-    $SUDO cp "$DEPLOY_DIR/chat-community.service" "$DEST_ROOT/"
+  # 安装监控脚本与 systemd 单元（如果发布包包含）
+  if [ -f "$ROOT_DIR/monitor.sh" ]; then
+    echo "部署监控脚本到 $DEST_ROOT/bin"
+    $SUDO mkdir -p "$DEST_ROOT/bin"
+    $SUDO cp "$ROOT_DIR/monitor.sh" "$DEST_ROOT/bin/monitor.sh"
+    $SUDO chmod +x "$DEST_ROOT/bin/monitor.sh" || true
+    # 若存在相应 systemd 单元模板，则安装
+    if [ -f "$ROOT_DIR/chat-community-monitor.service" ] && [ -f "$ROOT_DIR/chat-community-monitor.timer" ]; then
+      $SUDO cp "$ROOT_DIR/chat-community-monitor.service" /etc/systemd/system/chat-community-monitor.service || true
+      $SUDO cp "$ROOT_DIR/chat-community-monitor.timer" /etc/systemd/system/chat-community-monitor.timer || true
+      $SUDO systemctl daemon-reload || true
+      $SUDO systemctl enable --now chat-community-monitor.timer || true
+    fi
+  fi
+  if [ -f "$ROOT_DIR/run_api.sh" ]; then
+    $SUDO cp "$ROOT_DIR/run_api.sh" "$DEST_ROOT/"
+    $SUDO chmod 755 "$DEST_ROOT/run_api.sh" || true
+  fi
+  if [ -f "$ROOT_DIR/chat-community.service" ]; then
+    $SUDO cp "$ROOT_DIR/chat-community.service" "$DEST_ROOT/"
     $SUDO chmod 644 "$DEST_ROOT/chat-community.service" || true
   fi
 
@@ -762,19 +705,14 @@ function deploy_to_system() {
     $SUDO chmod 600 "$DEST_ROOT/api/.env" || true
   fi
 
-  # 安装生产依赖
-  # 安装生产依赖：优先使用已复制的 install_prod_deps.sh（以 chatcomm 用户执行）
-  if [ -f "$DEST_ROOT/install_prod_deps.sh" ]; then
-    echo "使用 $DEST_ROOT/install_prod_deps.sh 安装生产依赖（以 chatcomm 用户）"
-    $SUDO -u chatcomm bash -c "cd '$DEST_ROOT' && ./install_prod_deps.sh" || true
-  else
-    if [ -f "$DEST_ROOT/api/package.json" ]; then
-      if command -v pnpm >/dev/null 2>&1; then
-        $SUDO -u chatcomm pnpm install --prod --dir "$DEST_ROOT/api" || true
-      else
-        echo "pnpm 未安装，尝试使用 npm 安装生产依赖"
-        $SUDO -u chatcomm npm ci --only=production --prefix "$DEST_ROOT/api" || true
-      fi
+  # 安装生产依赖：直接在目标 api 目录下为生产环境安装依赖
+  if [ -f "$DEST_ROOT/api/package.json" ]; then
+    if command -v pnpm >/dev/null 2>&1; then
+      echo "使用 pnpm 安装生产依赖（以 chatcomm 用户）"
+      run_cmd_noexit $SUDO -u chatcomm bash -lc "cd '$DEST_ROOT/api' && pnpm install --prod --frozen-lockfile || pnpm install --prod" || true
+    else
+      echo "pnpm 未安装，尝试使用 npm 安装生产依赖（以 chatcomm 用户）"
+      run_cmd_noexit $SUDO -u chatcomm bash -lc "cd '$DEST_ROOT/api' && npm ci --only=production || true" || true
     fi
   fi
 
@@ -815,8 +753,7 @@ SERVICE
     $SUDO systemctl enable --now chat-community.service || true
   fi
 }
-
-# 主流程：生成 env、配置 postgres、nginx 并部署
+# 主流程：生成 env、配置 postgres、nginx 并部署（直接在当前机器上部署）
 generate_env_file
 setup_postgres_db_and_user
 install_nginx_and_config
@@ -824,16 +761,9 @@ deploy_to_system
 
 echo
 echo -e "\033[1;32m************************************************************\033[0m"
-echo -e "\033[1;32m 完成。后续建议：\033[0m"
-echo
-echo -e "  \033[1;33m1) 将发布包打包并传到目标 Linux 服务器：\033[0m"
-echo -e "      \033[1;37mcd $ROOT_DIR && tar -czf chat-community-deploy.tar.gz deploy_package\033[0m"
-echo
-echo -e "  \033[1;33m2) 在目标机器解压并进入 deploy_package：\033[0m"
-echo -e "      \033[1;37mtar -xzf chat-community-deploy.tar.gz && cd deploy_package && sudo ./install_prod_deps.sh && sudo ./run_api.sh\033[0m"
-echo
-echo -e "  \033[1;33m3) 将 API 设置为 systemd 服务（可选）：\033[0m"
-echo -e "      \033[1;37msudo mv chat-community.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now chat-community.service\033[0m"
+echo -e "\033[1;32m 部署完成：\033[0m 已将构建产物部署到 /opt/chat-community。"
+echo -e "\033[1;33m提示：如需在目标机器上重新安装生产依赖，请运行：\033[0m"
+echo -e "  \033[1;37msudo -u chatcomm bash -lc 'cd /opt/chat-community/api && pnpm install --prod'\033[0m"
 echo -e "\033[1;32m************************************************************\033[0m"
 echo
 
