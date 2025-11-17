@@ -85,7 +85,7 @@ SYSTEMD_SERVICE="/etc/systemd/system/chat-community-api.service"
 ENV_FILE="/etc/chat-community/api.env"
 
 # 1) Stop & disable systemd service if present
-if [[ -f "$SYSTEMD_SERVICE" || systemctl list-units --full -all | grep -q "chat-community-api" ]]; then
+if [[ -f "$SYSTEMD_SERVICE" ]] || systemctl list-units --full -all | grep -q "chat-community-api"; then
   echo "Found systemd unit: $SYSTEMD_SERVICE"
   confirm_or_die "Stop and disable systemd service 'chat-community-api'?"
   run_or_echo "systemctl stop chat-community-api.service || true"
