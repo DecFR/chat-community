@@ -348,7 +348,7 @@ PG_PASSWORD=$PG_PASSWORD
 PG_DB=$PG_DB
 PG_HOST=$PG_HOST
 PG_PORT=$PG_PORT
-DATABASE_URL=postgresql://$PG_USER:$PG_PASSWORD@$PG_HOST:$PG_PORT/$PG_DB
+DATABASE_URL=postgresql://${PG_USER:-postgres}:$PG_PASSWORD@$PG_HOST:$PG_PORT/$PG_DB
 ENCRYPTION_KEY=$ENCRYPTION_KEY
 JWT_SECRET=$JWT_SECRET
 SESSION_SECRET=$SESSION_SECRET
@@ -402,21 +402,14 @@ function setup_postgres_db_and_user() {
     fi
   }
 
-  # 如果使用 postgres 超级用户，则只更新其密码；否则创建或更新应用用户
-  if [ "$PG_USER" = "postgres" ]; then
-    echo "使用超级用户 'postgres'：尝试设置/更新 postgres 密码（如需要）。"
-    # 对 postgres 角色设置密码（若 postgres 用户不存在，此命令会失败）
-    psql_exec "ALTER ROLE \"postgres\" WITH LOGIN PASSWORD '$PG_PASSWORD';" || true
-  else
-    exists=$(psql_query "SELECT 1 FROM pg_roles WHERE rolname='$PG_USER'" || echo "")
-    if [ "x$exists" = "x1" ]; then
-      echo "角色 $PG_USER 已存在，尝试更新密码。"
-      psql_exec "ALTER ROLE \"$PG_USER\" WITH LOGIN PASSWORD '$PG_PASSWORD';" || fail "无法更新角色密码"
-    else
-      echo "创建角色 $PG_USER"
-      psql_exec "CREATE ROLE \"$PG_USER\" WITH LOGIN PASSWORD '$PG_PASSWORD';" || fail "无法创建角色"
-    fi
+  # 强制使用 postgres 超级用户（不在部署脚本中创建或修改除 postgres 外的应用用户）
+  if [ "$PG_USER" != "postgres" ]; then
+    echo "注意：部署配置要求使用默认超级用户 'postgres'，忽略 PG_USER=$PG_USER 并切换为 'postgres'."
+    PG_USER="postgres"
   fi
+  echo "使用超级用户 'postgres'：尝试设置/更新 postgres 密码（如需要）。"
+  # 对 postgres 角色设置密码（若 postgres 用户不存在，此命令会失败）
+  psql_exec "ALTER ROLE \"postgres\" WITH LOGIN PASSWORD '$PG_PASSWORD';" || true
 
   # 创建数据库并设置拥有者
   db_exists=$(psql_query "SELECT 1 FROM pg_database WHERE datname='$PG_DB'" || echo "")
@@ -751,7 +744,123 @@ SERVICE
 generate_env_file
 setup_postgres_db_and_user
 install_nginx_and_config
+
 deploy_to_system
+
+# 检查 API 健康状态：在部署并启动服务后轮询 /health，失败则收集日志并退出
+function check_api_health() {
+  echo "检查 API 健康状态..."
+  DEST_ENV="$DEST_ROOT/api/.env"
+  # 读取 PORT，如果不存在则默认 3000
+  if [ -f "$DEST_ENV" ]; then
+    PORT=$(grep -E '^PORT=' "$DEST_ENV" | cut -d= -f2- || true)
+  else
+    PORT="3000"
+  fi
+  PORT=${PORT:-3000}
+
+  HEALTH_URL="http://127.0.0.1:$PORT/health"
+  echo "Health URL: $HEALTH_URL"
+
+  # 选择工具：优先 curl，其次 wget
+  if command -v curl >/dev/null 2>&1; then
+    CMD_TOOL="curl -sSf"
+  elif command -v wget >/dev/null 2>&1; then
+    CMD_TOOL="wget -qO-"
+  else
+    echo "未检测到 curl 或 wget，无法执行 HTTP 健康检查。请手动检查 $HEALTH_URL" >&2
+    return 1
+  fi
+
+  attempts=12
+  interval=2
+  i=1
+  while [ $i -le $attempts ]; do
+    echo "尝试健康检查：#${i}/${attempts}..."
+    if $CMD_TOOL "$HEALTH_URL" >/tmp/chat-health-response 2>/dev/null; then
+      echo "API 健康检查通过："
+      cat /tmp/chat-health-response || true
+      rm -f /tmp/chat-health-response || true
+      return 0
+    fi
+    sleep $interval
+    i=$((i+1))
+  done
+
+  echo "API 健康检查失败：在 $((attempts*interval)) 秒内未能访问 $HEALTH_URL" >&2
+  echo "收集 systemd 日志（最近 500 行）和部署日志供排查："
+  LOGOUT="/tmp/chat-community-service.log"
+  if [ -n "${SUDO:-}" ]; then
+    $SUDO journalctl -u chat-community.service -n 500 --no-pager > "$LOGOUT" 2>/dev/null || true
+    echo "--- systemd 最近 200 行 ---"
+    $SUDO journalctl -u chat-community.service -n 200 --no-pager || true
+  else
+    journalctl -u chat-community.service -n 500 --no-pager > "$LOGOUT" 2>/dev/null || true
+    echo "--- systemd 最近 200 行 ---"
+    journalctl -u chat-community.service -n 200 --no-pager || true
+  fi
+
+  # 将收集的日志合并到临时文件，然后尝试保存到部署目录下以便事后分析
+  MERGE_OUT="/tmp/chat-community-deploy-fail.log"
+  : > "$MERGE_OUT" || true
+  echo "==== Chat-Community 部署失败日志 - $(date +%Y-%m-%dT%H:%M:%S%z) ====" | tee -a "$MERGE_OUT"
+
+  echo "--- systemd (最近 500 行，已保存到 $LOGOUT) ---" | tee -a "$MERGE_OUT"
+  if [ -f "$LOGOUT" ]; then
+    cat "$LOGOUT" | tail -n 500 | tee -a "$MERGE_OUT" || true
+  fi
+
+  echo "--- systemd 最近 200 行（实时） ---" | tee -a "$MERGE_OUT"
+  if [ -n "${SUDO:-}" ]; then
+    $SUDO journalctl -u chat-community.service -n 200 --no-pager | tee -a "$MERGE_OUT" || true
+  else
+    journalctl -u chat-community.service -n 200 --no-pager | tee -a "$MERGE_OUT" || true
+  fi
+
+  echo "--- 部署脚本日志（最后 200 行） ---" | tee -a "$MERGE_OUT"
+  tail -n 200 "$LOG_FILE" | tee -a "$MERGE_OUT" || true
+
+  echo "--- /opt/chat-community/api 目录列表 ---" | tee -a "$MERGE_OUT"
+  if [ -d "/opt/chat-community/api" ]; then
+    ls -la /opt/chat-community/api 2>/dev/null | tee -a "$MERGE_OUT" || true
+    echo "--- dist 目录列表 ---" | tee -a "$MERGE_OUT"
+    ls -la /opt/chat-community/api/dist 2>/dev/null | tee -a "$MERGE_OUT" || true
+  fi
+
+  echo "请检查上面的日志输出以定位异常（Node 堆栈通常出现在 systemd 日志中）。" | tee -a "$MERGE_OUT" >&2
+
+  # 尝试持久化到部署目录下，使用 DEST_ROOT（deploy_to_system 中已设置为 /opt/chat-community）
+  TS=$(date +%Y%m%d%H%M%S)
+  if [ -n "${DEST_ROOT:-}" ]; then
+    OUTFILE="$DEST_ROOT/deploy_fail_${TS}.log"
+    echo "正在将合并日志保存为： $OUTFILE" | tee -a "$MERGE_OUT"
+    if [ -n "${SUDO:-}" ]; then
+      $SUDO mkdir -p "$DEST_ROOT" || true
+      $SUDO cp "$MERGE_OUT" "$OUTFILE" || true
+      $SUDO chmod 640 "$OUTFILE" || true
+      $SUDO chown root:root "$OUTFILE" || true
+    else
+      mkdir -p "$DEST_ROOT" || true
+      cp "$MERGE_OUT" "$OUTFILE" || true
+      chmod 640 "$OUTFILE" || true
+    fi
+    echo "已将部署失败日志持久化到： $OUTFILE" >&2
+  else
+    # 若未定义 DEST_ROOT，则将文件保留在 /tmp 并提示用户
+    OUTFILE="/tmp/deploy_fail_${TS}.log"
+    mv "$MERGE_OUT" "$OUTFILE" || true
+    chmod 640 "$OUTFILE" || true
+    echo "注意：未检测到部署根目录，已将合并日志保存在： $OUTFILE" >&2
+  fi
+
+  return 2
+}
+
+# 在部署后立即执行健康检查，若失败则退出（从而使整体部署失败以便回滚或人工干预）
+if ! check_api_health; then
+  echo "部署后的健康检查未通过，部署被标记为失败。" >&2
+  exit 1
+fi
 
 echo
 echo -e "\033[1;32m************************************************************\033[0m"
