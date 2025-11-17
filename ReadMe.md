@@ -152,6 +152,48 @@ chmod 600 /etc/chat-community/api.env
 
 注意：`ENCRYPTION_KEY` 是用于仓库 `packages/api/.env` 中的对称密钥，示例长度为 32 字节的十六进制（64 个 hex 字符）。
 
+### 生成安全密钥（推荐）
+
+建议使用安全的随机字节生成器来创建密钥，而不要手工编写或使用短文本。下面是一些常用方式（任选其一）。
+
+- 使用 OpenSSL（Linux / macOS）：
+
+  - 生成用于 `JWT_SECRET` 的 Base64 字符串（48 字节 -> 更长更安全）：
+    ```bash
+    openssl rand -base64 48
+    ```
+
+  - 生成用于 `ENCRYPTION_KEY` 的 32 字节十六进制（64 字符 hex）：
+    ```bash
+    openssl rand -hex 32
+    ```
+
+- 使用 Node.js（跨平台，适合已安装 Node 的环境）：
+
+  - 生成 `JWT_SECRET`（Base64）：
+    ```bash
+    node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"
+    ```
+
+  - 生成 `ENCRYPTION_KEY`（32 字节 hex）：
+    ```bash
+    node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+    ```
+
+- 使用 PowerShell（Windows / pwsh）：
+
+  - 生成 `JWT_SECRET`（Base64）：
+    ```powershell
+    $b = New-Object 'System.Byte[]' 48; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); [Convert]::ToBase64String($b)
+    ```
+
+  - 生成 `ENCRYPTION_KEY`（32 字节 hex）：
+    ```powershell
+    $b = New-Object 'System.Byte[]' 32; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); ($b | ForEach-Object { $_.ToString('x2') }) -join ''
+    ```
+
+把生成的值粘回到 `/etc/chat-community/api.env` 或 `packages/api/.env` 的相应字段中，确保文件权限为 `600` 并且只有服务运行用户可读。
+
 重要说明：仓库中默认不包含 `packages/api/.env` 文件（这是敏感凭据），因此在服务器上需要手动创建该文件或确保环境变量已通过 `/etc/chat-community/api.env`、systemd `EnvironmentFile` 或 shell `source` 的方式加载到运行迁移/启动服务的进程中。
 
 在服务器 `packages/api` 目录中创建 `.env` 的示例：
