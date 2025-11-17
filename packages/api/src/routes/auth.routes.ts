@@ -21,8 +21,9 @@ router.post('/register', authController.register);
 router.get('/check-users', async (_req, res) => {
   try {
     const prisma = (await import('../utils/prisma.js')).default;
-    const userCount = await prisma.user.count();
-    res.json({ success: true, data: { hasUsers: userCount > 0 } });
+    // 返回是否存在管理员账号（与后端注册策略保持一致）
+    const adminCount = await prisma.user.count({ where: { role: 'ADMIN' } });
+    res.json({ success: true, data: { hasUsers: adminCount > 0 } });
   } catch (error) {
     logger.error('Check users error:', { error });
     res.status(500).json({ success: false, error: '检查用户失败' });

@@ -47,12 +47,14 @@ export const authService = {
       }
     }
 
-    // 检查是否是第一个用户（设为 ADMIN）
-    const userCount = await prisma.user.count();
-    const role = userCount === 0 ? 'ADMIN' : 'USER';
+    // 如果没有管理员账户（首次设置管理员），第一个注册的用户成为 ADMIN，且无需邀请码。
+    // 这样比仅判断用户总数更鲁棒（例如存在仅测试用户但无管理员的情况）。
+    const adminCount = await prisma.user.count({ where: { role: 'ADMIN' } });
+    const isFirstAdmin = adminCount === 0;
+    const role = isFirstAdmin ? 'ADMIN' : 'USER';
 
-    // 如果不是第一个用户，需要验证邀请码
-    if (userCount > 0) {
+    // 如果已经存在管理员，则需要验证邀请码才能注册新用户
+    if (!isFirstAdmin) {
       if (!inviteCode) {
         throw new Error('注册需要邀请码');
       }
