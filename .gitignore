@@ -1,6 +1,9 @@
 # Dependencies
 node_modules
 .pnp
+# Dependencies
+node_modules
+.pnp
 .pnp.js
 
 # Testing
@@ -37,38 +40,33 @@ lerna-debug.log*
 *.db
 *.db-journal
 
-# Uploads
+# Uploads (top-level)
 uploads/*
 !uploads/.gitkeep
 
 # Ignore package artifacts
 /packages/*/node_modules/
-# Dependencies
-node_modules
-.pnp
-.pnp.js
+/packages/*/dist/
+/packages/*/pnpm-lock.yaml
 
-# Testing
-coverage
+# Per-package ignores (added by Copilot)
+# Ignore uploaded files inside package folders (ignore contents, keep .gitkeep)
+/packages/*/uploads/*
+!/packages/*/uploads/.gitkeep
 
-# Production
-build
-dist
+# Ignore per-package .env files (local secrets)
+/packages/**/.env*
 
-# Misc
-.DS_Store
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+# TypeScript build info files
+*.tsbuildinfo
 
-# Logs
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+# Temporary tsbuild files created inside node_modules by tsconfig settings
+**/node_modules/.tmp/
+
+# Local caches and editor history
+/.cache/
+.localhistory/
+.history/
 
 # Editor
 .vscode/*
