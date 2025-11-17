@@ -761,4 +761,30 @@ echo -e "  \033[1;37msudo -u chatcomm bash -lc 'cd /opt/chat-community/api && pn
 echo -e "\033[1;32m************************************************************\033[0m"
 echo
 
+echo "---- 部署后系统状态汇总 ----"
+echo "服务 (systemd):"
+$SUDO systemctl status chat-community.service --no-pager || true
+
+echo "nginx 状态:"
+$SUDO systemctl is-active --quiet nginx && echo "OK: nginx running" || echo "WARN: nginx not running"
+$SUDO systemctl status nginx --no-pager || true
+
+echo "监听端口 (3000):"
+$SUDO ss -ltnp | grep -E ':3000\\b' || echo "no listener on 3000"
+
+echo "Postgres 状态 (chat_community):"
+if $SUDO systemctl is-active --quiet postgresql 2>/dev/null || $SUDO systemctl is-active --quiet postgresql-18 2>/dev/null; then
+  echo "OK: postgres service active"
+  if command -v psql >/dev/null 2>&1; then
+    $SUDO -u postgres psql -d chat_community -c '\dt' >/dev/null 2>&1 && echo "OK: Postgres (chat_community) reachable" || echo "WARN: Postgres (chat_community) not reachable"
+  else
+    echo "WARN: psql not installed, cannot test DB connectivity"
+  fi
+else
+  echo "WARN: postgres service not running"
+fi
+
+echo "磁盘使用 (/opt/chat-community):"
+df -h /opt/chat-community 2>/dev/null | awk 'NR==1{next} {print "DISK:", $5, "used on", $1}' || echo "/opt/chat-community not found"
+
 exit 0
