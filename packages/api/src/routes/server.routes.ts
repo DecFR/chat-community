@@ -71,7 +71,7 @@ router.post('/', async (req, res) => {
     const isPublic = userRole === 'ADMIN';
 
     // 使用事务确保服务器和默认频道/成员的原子创建
-    const newServer = await prisma.$transaction(async (tx) => {
+    const newServer = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       // 1. 创建服务器
       const server = await tx.server.create({
         data: {
@@ -609,7 +609,7 @@ router.get('/my-join-requests', async (req, res) => {
     });
 
     // 格式化数据以匹配客户端期望的格式
-    const formattedRequests = requests.map((request) => ({
+    const formattedRequests = requests.map((request: any) => ({
       id: request.id,
       name: request.server.name,
       description: request.server.description,

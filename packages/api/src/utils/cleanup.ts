@@ -27,7 +27,7 @@ export async function cleanupUnusedAvatars(maxAgeOverride?: number) {
     const inUse = new Set(
       users
         .map((u: { avatarUrl: string | null }) => u.avatarUrl)
-        .filter((u): u is string => !!u && u.startsWith('/uploads/'))
+        .filter((u: string | null): u is string => !!u && u.startsWith('/uploads/'))
         .map((u: string) => u.split('/').pop() as string)
     );
 
