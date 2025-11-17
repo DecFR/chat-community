@@ -49,6 +49,12 @@ export default function RegisterPage() {
       return;
     }
 
+    // 如果后端要求邀请码但用户未填写，用 React 错误提示（避免浏览器原生提示）
+    if (requiresInvite && !inviteCode) {
+      setError('请输入邀请码');
+      return;
+    }
+
     setIsLoading(true);
 
     try {
@@ -130,7 +136,6 @@ export default function RegisterPage() {
                   className="input"
                   placeholder="请输入邀请码"
                   disabled={isLoading}
-                  required
                 />
                 <p className="text-xs text-gray-500 mt-1">
                   💡 需要向管理员获取邀请码才能注册
