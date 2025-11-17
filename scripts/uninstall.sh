@@ -145,8 +145,9 @@ if [[ "$KEEP_DB" == "no" ]]; then
         echo "Dump saved to $DB_BACKUP_PATH"
       fi
       confirm_or_die "Drop database 'chat_community' and user 'chatuser'? This is irreversible." 
-      run_or_echo "psql -v ON_ERROR_STOP=1 -c \"DROP DATABASE IF EXISTS \"chat_community\";\" "
-      run_or_echo "psql -v ON_ERROR_STOP=1 -c \"DROP ROLE IF EXISTS chatuser;\" "
+      # Use single-quote outer to keep inner SQL double-quotes intact and avoid bash parsing errors
+      run_or_echo 'psql -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS chat_community;"'
+      run_or_echo 'psql -v ON_ERROR_STOP=1 -c "DROP ROLE IF EXISTS chatuser;"'
     else
       echo "Database 'chat_community' not found, skipping drop."
     fi
