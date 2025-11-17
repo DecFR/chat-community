@@ -8,6 +8,52 @@ API_PORT=${PROXY_PORT:-3000}
 API_HOST=${API_HOST:-127.0.0.1}
 DB_NAME=${DB_NAME:-chat_community}
 DB_USER=${DB_USER:-postgres}
+LOG_DIR="/var/log/chat-community"
+DEPLOY_LOG="$LOG_DIR/deploy.log"
+
+function persist_monitor_failure_logs() {
+  # 合并日志到临时文件，然后持久化到 /opt/chat-community
+  MERGE_OUT="/tmp/chat-community-monitor-fail.log"
+  : > "$MERGE_OUT" || true
+  echo "==== Monitor failure - $(date +%Y-%m-%dT%H:%M:%S%z) ====" | tee -a "$MERGE_OUT"
+
+  LOGOUT="/tmp/chat-community-service-monitor.log"
+  if command -v sudo >/dev/null 2>&1; then
+    sudo journalctl -u chat-community.service -n 500 --no-pager > "$LOGOUT" 2>/dev/null || true
+  else
+    journalctl -u chat-community.service -n 500 --no-pager > "$LOGOUT" 2>/dev/null || true
+  fi
+
+  echo "--- systemd (last 500 lines) ---" | tee -a "$MERGE_OUT"
+  if [ -f "$LOGOUT" ]; then
+    tail -n 500 "$LOGOUT" | tee -a "$MERGE_OUT" || true
+  fi
+
+  echo "--- deploy log (last 200 lines) ---" | tee -a "$MERGE_OUT"
+  if [ -f "$DEPLOY_LOG" ]; then
+    tail -n 200 "$DEPLOY_LOG" | tee -a "$MERGE_OUT" || true
+  fi
+
+  echo "--- /opt/chat-community listing ---" | tee -a "$MERGE_OUT"
+  if [ -d "/opt/chat-community" ]; then
+    ls -la /opt/chat-community 2>/dev/null | tee -a "$MERGE_OUT" || true
+    ls -la /opt/chat-community/api 2>/dev/null | tee -a "$MERGE_OUT" || true
+  fi
+
+  TS=$(date +%Y%m%d%H%M%S)
+  OUTFILE="/opt/chat-community/monitor_fail_${TS}.log"
+  if command -v sudo >/dev/null 2>&1; then
+    sudo mkdir -p /opt/chat-community || true
+    sudo cp "$MERGE_OUT" "$OUTFILE" || true
+    sudo chmod 640 "$OUTFILE" || true
+    sudo chown root:root "$OUTFILE" || true
+  else
+    mkdir -p /opt/chat-community || true
+    cp "$MERGE_OUT" "$OUTFILE" || true
+    chmod 640 "$OUTFILE" || true
+  fi
+  echo "Monitor: persisted failure logs to: $OUTFILE" >&2
+}
 
 function fail() { echo "ERROR: $*" >&2; exit 2; }
 
@@ -72,6 +118,9 @@ function do_check() {
   check_api_http || ret=1
   check_db || true
   check_disk
+  if [ $ret -ne 0 ]; then
+    persist_monitor_failure_logs || true
+  fi
   return $ret
 }
 
@@ -131,7 +180,14 @@ case "${1:-}" in
     do_check || exit 1
     ;;
   watch)
-    while true; do do_check; sleep 30; done
+    while true; do
+      if ! do_check; then
+        # 当检测失败时，persist 已在 do_check 中处理；继续循环以便后续重试
+        sleep 30
+        continue
+      fi
+      sleep 30
+    done
     ;;
   install)
     install_systemd

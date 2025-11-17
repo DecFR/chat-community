@@ -12,6 +12,48 @@ if [ "$EUID" -ne 0 ]; then
   fi
 fi
 
+# 日志持久化：若卸载过程中出现错误，收集日志并保存到 /opt/chat-community/uninstall_fail_<ts>.log
+function persist_uninstall_failure_logs() {
+  MERGE_OUT="/tmp/chat-community-uninstall-fail.log"
+  : > "$MERGE_OUT" || true
+  echo "==== Uninstall failure - $(date +%Y-%m-%dT%H:%M:%S%z) ====" | tee -a "$MERGE_OUT"
+
+  LOGOUT="/tmp/chat-community-service-uninstall.log"
+  if [ -n "${SUDO:-}" ]; then
+    $SUDO journalctl -u chat-community.service -n 500 --no-pager > "$LOGOUT" 2>/dev/null || true
+  else
+    journalctl -u chat-community.service -n 500 --no-pager > "$LOGOUT" 2>/dev/null || true
+  fi
+
+  echo "--- systemd (last 500 lines) ---" | tee -a "$MERGE_OUT"
+  if [ -f "$LOGOUT" ]; then
+    tail -n 500 "$LOGOUT" | tee -a "$MERGE_OUT" || true
+  fi
+
+  echo "--- /opt/chat-community listing ---" | tee -a "$MERGE_OUT"
+  if [ -d "/opt/chat-community" ]; then
+    ls -la /opt/chat-community 2>/dev/null | tee -a "$MERGE_OUT" || true
+    ls -la /opt/chat-community/api 2>/dev/null | tee -a "$MERGE_OUT" || true
+  fi
+
+  TS=$(date +%Y%m%d%H%M%S)
+  OUTFILE="/opt/chat-community/uninstall_fail_${TS}.log"
+  if [ -n "${SUDO:-}" ]; then
+    $SUDO mkdir -p /opt/chat-community || true
+    $SUDO cp "$MERGE_OUT" "$OUTFILE" || true
+    $SUDO chmod 640 "$OUTFILE" || true
+    $SUDO chown root:root "$OUTFILE" || true
+  else
+    mkdir -p /opt/chat-community || true
+    cp "$MERGE_OUT" "$OUTFILE" || true
+    chmod 640 "$OUTFILE" || true
+  fi
+  echo "Uninstall: persisted failure logs to: $OUTFILE" >&2
+}
+
+# 捕获错误并持久化日志
+trap 'persist_uninstall_failure_logs || true; echo "Uninstall encountered an error." >&2' ERR
+
 # 参数解析：支持 --full|-f 完全清理（包含 PostgreSQL 软件与数据），以及 --yes|-y 跳过交互
 FULL=0
 AUTO_YES=0
