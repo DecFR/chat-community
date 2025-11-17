@@ -73,6 +73,28 @@ run_or_echo() {
   fi
 }
 
+# Execute SQL via psql. Try direct psql, then try via 'sudo -u postgres' if direct fails.
+execute_sql() {
+  local sql="$1"
+  if [[ "$DRY_RUN" == "yes" ]]; then
+    echo "DRY-RUN: psql -v ON_ERROR_STOP=1 -c \"$sql\""
+    return 0
+  fi
+
+  # Try running psql as current user
+  if psql -v ON_ERROR_STOP=1 -c "$sql"; then
+    return 0
+  fi
+
+  # If that failed, attempt to run as the 'postgres' system user (common on Debian/Ubuntu)
+  if command -v sudo >/dev/null 2>&1 && sudo -u postgres psql -v ON_ERROR_STOP=1 -c "$sql"; then
+    return 0
+  fi
+
+  echo "Error: failed to execute SQL via psql (tried direct and sudo -u postgres)." >&2
+  return 1
+}
+
 echo "== Chat-Community Uninstall Script =="
 
 if [[ $EUID -ne 0 ]]; then
@@ -145,9 +167,15 @@ if [[ "$KEEP_DB" == "no" ]]; then
         echo "Dump saved to $DB_BACKUP_PATH"
       fi
       confirm_or_die "Drop database 'chat_community' and user 'chatuser'? This is irreversible." 
-      # Use single-quote outer to keep inner SQL double-quotes intact and avoid bash parsing errors
-      run_or_echo 'psql -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS chat_community;"'
-      run_or_echo 'psql -v ON_ERROR_STOP=1 -c "DROP ROLE IF EXISTS chatuser;"'
+      # Execute DROP commands with fallback to 'sudo -u postgres' if needed
+      if ! execute_sql 'DROP DATABASE IF EXISTS chat_community;'; then
+        echo "Failed to drop database 'chat_community' automatically. You may need to run the following as a DB superuser:" >&2
+        echo "  sudo -u postgres psql -c \"DROP DATABASE IF EXISTS chat_community;\"" >&2
+      fi
+      if ! execute_sql 'DROP ROLE IF EXISTS chatuser;'; then
+        echo "Failed to drop role 'chatuser' automatically. You may need to run the following as a DB superuser:" >&2
+        echo "  sudo -u postgres psql -c \"DROP ROLE IF EXISTS chatuser;\"" >&2
+      fi
     else
       echo "Database 'chat_community' not found, skipping drop."
     fi
