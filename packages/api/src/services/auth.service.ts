@@ -160,25 +160,34 @@ export const authService = {
         const io = getIO();
         const socketsMap = io.sockets.sockets as Map<string, any>;
 
-        // 通知并断开旧的 socket（如果真实存在）
+        // 通知并断开旧的 socket（如果真实存在）—并记录日志以便排查
         for (const s of existingSessions) {
           const oldSocketId = s.socketId;
-          if (oldSocketId && socketsMap.has(oldSocketId)) {
+          if (oldSocketId) {
+            const found = socketsMap.has(oldSocketId);
             try {
-              io.to(oldSocketId).emit('forceLogout', {
-                reason: 'new_login',
-                message: '您的账号在其他设备登录',
-              });
-              const oldSocket = socketsMap.get(oldSocketId);
-              if (oldSocket && typeof oldSocket.disconnect === 'function') {
-                try {
-                  oldSocket.disconnect(true);
-                } catch (e) {
-                  // 忽略断开错误
-                }
-              }
+              logger.info(`auth.login forceLogout: user=${user.username} sessionId=${s.id} oldSocketId=${oldSocketId} found=${found}`);
             } catch (e) {
-              // 忽略通知错误，继续删除会话
+              // ignore logging errors
+            }
+
+            if (found) {
+              try {
+                io.to(oldSocketId).emit('forceLogout', {
+                  reason: 'new_login',
+                  message: '您的账号在其他设备登录',
+                });
+                const oldSocket = socketsMap.get(oldSocketId);
+                if (oldSocket && typeof oldSocket.disconnect === 'function') {
+                  try {
+                    oldSocket.disconnect(true);
+                  } catch (e) {
+                    // 忽略断开错误
+                  }
+                }
+              } catch (e) {
+                // 忽略通知错误，继续删除会话
+              }
             }
           }
         }
