@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 
 import prisma from '../utils/prisma.js';
 import { getIO } from '../socket/index.js';
+import logger from '../utils/logger.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 const SALT_ROUNDS = 10;
