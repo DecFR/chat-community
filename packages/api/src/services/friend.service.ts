@@ -195,23 +195,25 @@ export const friendService = {
     });
 
     // 映射为好友对象
-    const friends = friendships.map((f: {
-      id: string;
-      senderId: string;
-      receiverId: string;
-      sender: { id: string; username: string; avatarUrl?: string | null; status?: string };
-      receiver: { id: string; username: string; avatarUrl?: string | null; status?: string };
-    }) => {
-      const friend = f.senderId === userId ? f.receiver : f.sender;
-      return {
-        friendshipId: f.id,
-        id: friend.id,
-        username: friend.username,
-        // 保持与前端约定的字段名一致
-        avatarUrl: friend.avatarUrl,
-        status: friend.status,
-      };
-    });
+    const friends = friendships.map(
+      (f: {
+        id: string;
+        senderId: string;
+        receiverId: string;
+        sender: { id: string; username: string; avatarUrl?: string | null; status?: string };
+        receiver: { id: string; username: string; avatarUrl?: string | null; status?: string };
+      }) => {
+        const friend = f.senderId === userId ? f.receiver : f.sender;
+        return {
+          friendshipId: f.id,
+          id: friend.id,
+          username: friend.username,
+          // 保持与前端约定的字段名一致
+          avatarUrl: friend.avatarUrl,
+          status: friend.status,
+        };
+      }
+    );
 
     return friends;
   },

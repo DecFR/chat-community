@@ -60,11 +60,11 @@ export const authController = {
         const ipAddress = req.ip || req.socket.remoteAddress;
         const userAgent = req.headers['user-agent'];
 
-        const result = await authService.login({ 
-          username, 
-          password, 
-          ipAddress, 
-          userAgent 
+        const result = await authService.login({
+          username,
+          password,
+          ipAddress,
+          userAgent,
         });
 
         res.json(successResponse(result, 'Login successful'));

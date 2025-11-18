@@ -14,7 +14,7 @@ const isSingleCore = cpuCores <= 1;
 // 线程数自动为核心数一半，最少1
 const maxThreads = isSingleCore ? 1 : Math.ceil(cpuCores / 2);
 const isDev = (process.env.NODE_ENV || 'development') === 'development';
-const enableCluster = !isDev && !isSingleCore && (process.env.ENABLE_CLUSTER !== 'false');
+const enableCluster = !isDev && !isSingleCore && process.env.ENABLE_CLUSTER !== 'false';
 
 if (enableCluster && cluster.isPrimary) {
   logger.info(`🚀 主进程 ${process.pid} 启动，准备 fork ${maxThreads} 个 worker...`);
@@ -76,14 +76,22 @@ if (enableCluster && cluster.isPrimary) {
         const PORT = process.env.PORT || 3000;
         const app: import('express').Application = express();
         const httpServer = http.createServer(app);
-        app.use(helmet({
-          contentSecurityPolicy: {
-            directives: {
-              ...helmet.contentSecurityPolicy.getDefaultDirectives(),
-              "img-src": ["'self'", "data:", "blob:", "http://localhost:3000", "http://localhost:5173"],
+        app.use(
+          helmet({
+            contentSecurityPolicy: {
+              directives: {
+                ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+                'img-src': [
+                  "'self'",
+                  'data:',
+                  'blob:',
+                  'http://localhost:3000',
+                  'http://localhost:5173',
+                ],
+              },
             },
-          },
-        }));
+          })
+        );
         app.use(
           cors({
             origin: (origin, callback) => {
@@ -102,10 +110,10 @@ if (enableCluster && cluster.isPrimary) {
         app.use(express.json());
         app.use(express.urlencoded({ extended: true }));
         app.use(passport.initialize());
-        
+
         // 静态文件服务 - uploads目录
         const uploadsPath = path.join(__dirname, '../uploads');
-        console.log('[Static Files] Serving /uploads from:', uploadsPath);
+        logger.info('[Static Files] Serving /uploads from: ' + uploadsPath);
         app.use(
           '/uploads',
           cors({
@@ -116,10 +124,10 @@ if (enableCluster && cluster.isPrimary) {
           express.static(uploadsPath)
         );
         app.use('/api/auth', authRoutes);
-                // 分片上传路由
-                import('./routes/chunk-upload.routes.js').then(({ default: chunkUploadRoutes }) => {
-                  app.use('/api', chunkUploadRoutes);
-                });
+        // 分片上传路由
+        import('./routes/chunk-upload.routes.js').then(({ default: chunkUploadRoutes }) => {
+          app.use('/api', chunkUploadRoutes);
+        });
         app.use('/api/users', userRoutes);
         app.use('/api/friends', friendRoutes);
         app.use('/api/servers', serverRoutes);

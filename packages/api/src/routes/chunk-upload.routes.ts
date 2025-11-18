@@ -1,11 +1,11 @@
-
-import path from 'path';
 import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
 import { Router } from 'express';
 import multer from 'multer';
-import { nanoid } from 'nanoid';
+
 import { authMiddleware } from '../middleware/auth.js';
-import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -47,7 +47,7 @@ router.post('/upload-chunk', authMiddleware, uploadChunk.single('chunk'), async 
     const chunkName = `${fileId}_${chunkIndex}`;
     fs.renameSync(file.path, path.join(CHUNK_DIR, chunkName));
     return res.json({ success: true });
-  } catch (err) {
+  } catch {
     return res.status(500).json({ success: false, error: '分片保存失败' });
   }
 });
@@ -76,7 +76,10 @@ router.post('/merge-chunks', authMiddleware, async (req, res) => {
       }
     }
 
-    const finalPath = path.join(UPLOAD_DIR, `media-${fileId}-${Date.now()}${path.extname(filename)}`);
+    const finalPath = path.join(
+      UPLOAD_DIR,
+      `media-${fileId}-${Date.now()}${path.extname(filename)}`
+    );
     const writeStream = fs.createWriteStream(finalPath);
     for (let i = 0; i < totalChunks; i++) {
       const chunkPath = path.join(CHUNK_DIR, `${fileId}_${i}`);
@@ -86,7 +89,7 @@ router.post('/merge-chunks', authMiddleware, async (req, res) => {
     }
     writeStream.end();
     return res.json({ success: true, url: `/uploads/${path.basename(finalPath)}` });
-  } catch (err) {
+  } catch {
     return res.status(500).json({ success: false, error: '分片合并失败' });
   }
 });

@@ -7,6 +7,11 @@ export interface ChunkUploadOptions {
   onComplete?: (url: string) => void;
 }
 
+const RAW_BASE = import.meta.env.VITE_API_URL ?? '';
+const API_BASE = RAW_BASE ? RAW_BASE.replace(/\/?api\/?$/i, '').replace(/\/$/, '') : '';
+const UPLOAD_CHUNK_ENDPOINT = API_BASE ? `${API_BASE}/api/upload-chunk` : '/api/upload-chunk';
+const MERGE_CHUNKS_ENDPOINT = API_BASE ? `${API_BASE}/api/merge-chunks` : '/api/merge-chunks';
+
 export async function uploadFileInChunks(options: ChunkUploadOptions) {
   const { file, chunkSize = 5 * 1024 * 1024, onProgress, onError, onComplete } = options;
   const totalChunks = Math.ceil(file.size / chunkSize);
@@ -23,11 +28,23 @@ export async function uploadFileInChunks(options: ChunkUploadOptions) {
     formData.append('chunkIndex', String(i));
     formData.append('totalChunks', String(totalChunks));
     try {
-      await fetch('/api/upload-chunk', {
+      const token = localStorage.getItem('token');
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch(UPLOAD_CHUNK_ENDPOINT, {
         method: 'POST',
-        credentials: 'include',
         body: formData,
+        headers,
       });
+
+      if (!res.ok) {
+        const text = await res.text();
+        const err = new Error(`Chunk upload failed: ${res.status} ${text}`);
+        if (onError) onError(err);
+        return;
+      }
+
       if (onProgress) onProgress(Math.round(((i + 1) / totalChunks) * 100));
     } catch (err) {
       if (onError) onError(err as Error);
@@ -36,12 +53,23 @@ export async function uploadFileInChunks(options: ChunkUploadOptions) {
   }
   // 分片全部上传后，通知后端合并
   try {
-    const mergeRes = await fetch('/api/merge-chunks', {
+    const token = localStorage.getItem('token');
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const mergeRes = await fetch(MERGE_CHUNKS_ENDPOINT, {
       method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ fileId, filename: file.name, totalChunks }),
     });
+
+    if (!mergeRes.ok) {
+      const text = await mergeRes.text();
+      const err = new Error(`Merge failed: ${mergeRes.status} ${text}`);
+      if (onError) onError(err);
+      return;
+    }
+
     const result = await mergeRes.json();
     if (result.success && onComplete) onComplete(result.url);
   } catch (err) {

@@ -50,7 +50,7 @@ export const userService = {
       const existingUser = await prisma.user.findFirst({
         where: {
           username: updates.username,
-          NOT: { id: userId }
+          NOT: { id: userId },
         },
       });
       if (existingUser) {
@@ -63,7 +63,7 @@ export const userService = {
       const existingUser = await prisma.user.findFirst({
         where: {
           email: updates.email,
-          NOT: { id: userId }
+          NOT: { id: userId },
         },
       });
       if (existingUser) {
@@ -186,10 +186,18 @@ export const userService = {
     }
 
     // 将关系附加到返回对象
-    return users.map((u: { id: string; username: string; avatarUrl?: string | null; bio?: string | null; status?: string }) => ({
-      ...u,
-      relationship: relByUser.get(u.id) || 'NONE',
-    }));
+    return users.map(
+      (u: {
+        id: string;
+        username: string;
+        avatarUrl?: string | null;
+        bio?: string | null;
+        status?: string;
+      }) => ({
+        ...u,
+        relationship: relByUser.get(u.id) || 'NONE',
+      })
+    );
   },
 
   /**

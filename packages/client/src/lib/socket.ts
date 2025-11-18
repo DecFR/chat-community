@@ -1,8 +1,10 @@
 import { io, Socket } from 'socket.io-client';
 import { logoutProxy, updateUserProxy } from './authProxy';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-const SOCKET_URL = API_URL.replace('/api', ''); // 移除 /api 后缀获取Socket.io服务器URL
+const API_URL = import.meta.env.VITE_API_URL ?? '';
+// 如果构建时未指定 VITE_API_URL（生产建议使用相对路径），则 SOCKET_URL 为 undefined，
+// 这会让 socket.io 使用同源连接（即与前端页面相同的 host & protocol），避免将浏览器流量指向 localhost:3000
+const SOCKET_URL = API_URL ? API_URL.replace(/\/api\/?$/, '') : undefined; // 移除 /api 后缀获取 Socket.io 服务器 URL
 
 class SocketService {
   private socket: Socket | null = null;
@@ -15,17 +17,24 @@ class SocketService {
       return this.socket;
     }
 
-    this.socket = io(SOCKET_URL, {
-      auth: {
-        token,
-      },
+    const opts = {
+      auth: { token },
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionAttempts: 5,
-      transports: ['polling', 'websocket'],
-    });
+      transports: ['polling', 'websocket'] as any,
+    };
 
-    this.socket.on('connect', () => {
+    // 若未提供 SOCKET_URL，则让 socket.io 以同源方式连接（在浏览器中这会使用页面的 origin）
+    if (SOCKET_URL) {
+      this.socket = io(SOCKET_URL, opts);
+    } else {
+      // 调用 io() 而不传 URL，等同于连接到页面所在的 origin
+      // 这里通过 as any 让 TS 接受第二种调用签名
+      this.socket = (io as any)(opts);
+    }
+
+    this.socket!.on('connect', () => {
       console.log('Socket connected');
       
       // 连接建立后，立即加入所有待处理的服务器房间
@@ -44,18 +53,18 @@ class SocketService {
       }
     });
 
-    this.socket.on('disconnect', () => {
+    this.socket!.on('disconnect', () => {
       console.log('Socket disconnected');
       // 断开连接时清空已加入房间记录，以便重连后重新加入
       this.joinedServers.clear();
     });
 
-    this.socket.on('error', (error) => {
+    this.socket!.on('error', (error) => {
       console.error('Socket error:', error);
     });
 
     // 监听强制登出事件
-    this.socket.on('forceLogout', (data: { reason: string; message: string }) => {
+    this.socket!.on('forceLogout', (data: { reason: string; message: string }) => {
       try {
         console.warn('Force logout:', data);
         // 使用 authProxy 调用已注册的登出函数
@@ -71,7 +80,7 @@ class SocketService {
     });
 
     // 全局监听自身资料更新，直接写入 authStore，保证任何界面都实时更新
-    this.socket.on('userProfileUpdate', (data: { userId: string; avatarUrl?: string; username?: string }) => {
+    this.socket!.on('userProfileUpdate', (data: { userId: string; avatarUrl?: string; username?: string }) => {
       try {
         updateUserProxy({ ...(data.avatarUrl !== undefined && { avatarUrl: data.avatarUrl }), ...(data.username && { username: data.username }), id: data.userId });
       } catch (e) {

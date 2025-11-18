@@ -1,5 +1,5 @@
-import prisma from './prisma.js';
 import logger from './logger.js';
+import prisma from './prisma.js';
 
 /**
  * 清理过期的用户会话
@@ -31,9 +31,12 @@ export function startSessionCleanupScheduler() {
   cleanupExpiredSessions();
 
   // 每小时执行一次
-  setInterval(() => {
-    cleanupExpiredSessions();
-  }, 60 * 60 * 1000); // 1小时
+  setInterval(
+    () => {
+      cleanupExpiredSessions();
+    },
+    60 * 60 * 1000
+  ); // 1小时
 
   logger.info('Session cleanup scheduler started');
 }

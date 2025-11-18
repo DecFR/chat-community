@@ -42,7 +42,7 @@ export const serverRequestController = {
         });
 
         // 向每个管理员发送通知
-          admins.forEach((admin: { id: string }) => {
+        admins.forEach((admin: { id: string }) => {
           io.to(`user-${admin.id}`).emit('notification', {
             id: `server-request-${request.id}`,
             type: 'system',

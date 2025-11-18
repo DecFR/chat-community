@@ -36,10 +36,7 @@ router.get('/search', async (req, res) => {
         _count: { select: { members: true, channels: true } },
       },
       // 优先显示公开服务器，其次按创建时间倒序
-      orderBy: [
-        { isPublic: 'desc' },
-        { createdAt: 'desc' },
-      ],
+      orderBy: [{ isPublic: 'desc' }, { createdAt: 'desc' }],
       take: 50,
     });
 
@@ -176,9 +173,14 @@ router.get('/', async (req, res) => {
     });
 
     // 过滤: 用户已加入的服务器 OR (管理员创建的公开服务器)
-    const servers = allServers.filter((server: any) => {
-      const isUserMember = userServerIds.includes(server.id);
-      const isAdminPublicServer = server.owner.role === 'ADMIN' && server.isPublic;
+    const servers = allServers.filter((server: unknown) => {
+      const s = server as {
+        id: string;
+        owner?: { role?: string } | null;
+        isPublic?: boolean;
+      };
+      const isUserMember = userServerIds.includes(s.id);
+      const isAdminPublicServer = s.owner?.role === 'ADMIN' && !!s.isPublic;
       return isUserMember || isAdminPublicServer;
     });
 
@@ -273,13 +275,19 @@ router.get('/:id/members', async (req, res) => {
     });
 
     // 映射为前端所需结构
-    const result = members.map((m: any) => ({
-      id: m.user.id,
-      username: m.user.username,
-      avatarUrl: m.user.avatarUrl ?? undefined,
-      role: m.role,
-      status: m.user.status,
-    }));
+    const result = members.map((m: unknown) => {
+      const mm = m as {
+        user: { id: string; username: string; avatarUrl?: string | null; status: string };
+        role: string;
+      };
+      return {
+        id: mm.user.id,
+        username: mm.user.username,
+        avatarUrl: mm.user.avatarUrl ?? undefined,
+        role: mm.role,
+        status: mm.user.status,
+      };
+    });
 
     return res.json({ success: true, data: result });
   } catch (error: unknown) {
@@ -609,18 +617,30 @@ router.get('/my-join-requests', async (req, res) => {
     });
 
     // 格式化数据以匹配客户端期望的格式
-    const formattedRequests = requests.map((request: any) => ({
-      id: request.id,
-      name: request.server.name,
-      description: request.server.description,
-      status: request.status,
-      reason: request.reason,
-      reviewNote: request.reviewNote,
-      reviewedAt: request.reviewedAt,
-      createdAt: request.createdAt,
-      serverId: request.serverId,
-      serverIconUrl: request.server.iconUrl,
-    }));
+    const formattedRequests = requests.map((request: unknown) => {
+      const r = request as {
+        id: string;
+        server: { name?: string; description?: string; iconUrl?: string | null };
+        status: string;
+        reason?: string | null;
+        reviewNote?: string | null;
+        reviewedAt?: string | null;
+        createdAt: string;
+        serverId: string;
+      };
+      return {
+        id: r.id,
+        name: r.server.name,
+        description: r.server.description,
+        status: r.status,
+        reason: r.reason,
+        reviewNote: r.reviewNote,
+        reviewedAt: r.reviewedAt,
+        createdAt: r.createdAt,
+        serverId: r.serverId,
+        serverIconUrl: r.server.iconUrl,
+      };
+    });
 
     return res.json({ success: true, data: formattedRequests });
   } catch (error: unknown) {
@@ -628,7 +648,6 @@ router.get('/my-join-requests', async (req, res) => {
     return res.status(500).json({ success: false, error: message });
   }
 });
-
 
 /**
  * @route   GET /api/servers/:id/join-requests
@@ -686,7 +705,7 @@ router.post('/:serverId/join-requests/:requestId/review', async (req, res) => {
       const existingMember = await prisma.serverMember.findUnique({
         where: { serverId_userId: { serverId, userId: reqRec.applicantId } },
       });
-      
+
       if (existingMember) {
         // 用户已经是成员，只更新申请状态
         await prisma.serverJoinRequest.update({
@@ -700,7 +719,7 @@ router.post('/:serverId/join-requests/:requestId/review', async (req, res) => {
         });
         return res.json({ success: true, message: '用户已是服务器成员' });
       }
-      
+
       // 同意：创建成员，更新申请
       await prisma.$transaction([
         prisma.serverMember.create({

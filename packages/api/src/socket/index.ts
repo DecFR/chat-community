@@ -85,13 +85,31 @@ export function initializeSocket(httpServer: HttpServer) {
 
       // 检查是否有其他活跃的Socket连接（单点登录控制）
       if (session.socketId && session.socketId !== socket.id) {
-        // 通知旧的连接被踢出
-        io.to(`user-${socket.userId}`).emit('forceLogout', {
-          reason: 'new_login',
-          message: '您的账号在其他设备登录',
-        });
-        
-        logger.info(`User ${socket.username} logged in from new device, kicking out old session`);
+        // 仅向旧的 socketId 发送 forceLogout，而不是广播到整个用户房间，避免把本次连接也误踢
+        const oldSocketId = session.socketId;
+        try {
+          io.to(oldSocketId).emit('forceLogout', {
+            reason: 'new_login',
+            message: '您的账号在其他设备登录',
+          });
+
+          // 如果能拿到旧的 socket 实例，尝试断开它以释放资源
+          const socketsMap = io.sockets.sockets as Map<string, Socket>;
+          const oldSocket = socketsMap.get(oldSocketId);
+          if (oldSocket && typeof oldSocket.disconnect === 'function') {
+            try {
+              oldSocket.disconnect(true);
+            } catch (e) {
+              logger.debug('Failed to forcibly disconnect old socket:', e);
+            }
+          }
+        } catch (e) {
+          logger.error('Error notifying old socket about forceLogout:', e);
+        }
+
+        logger.info(
+          `User ${socket.username} logged in from new device, kicking out old socket ${oldSocketId}`
+        );
       }
 
       // 更新会话的Socket ID和活跃时间
@@ -132,13 +150,13 @@ export function initializeSocket(httpServer: HttpServer) {
       where: { userId: socket.userId },
       select: { serverId: true },
     });
-    
+
     // 立即加入所有服务器房间，确保用户能接收到频道消息
     memberships.forEach((m: { serverId: string }) => {
       socket.join(`server-${m.serverId}`);
       logger.debug(`User ${socket.username} auto-joined server room: server-${m.serverId}`);
     });
-    
+
     logger.info(`User ${socket.username} joined ${memberships.length} server rooms`);
 
     // 通知所有服务器成员列表更新
@@ -182,7 +200,7 @@ export function initializeSocket(httpServer: HttpServer) {
         const lastAt = lastMessageAt.get(socket.userId!);
         if (lastAt && now - lastAt < MIN_INTERVAL_MS) {
           const waitMs = MIN_INTERVAL_MS - (now - lastAt);
-            socket.emit('messageRateLimited', { waitMs });
+          socket.emit('messageRateLimited', { waitMs });
           return;
         }
 
@@ -215,25 +233,27 @@ export function initializeSocket(httpServer: HttpServer) {
             attachments:
               attachments && attachments.length > 0
                 ? {
-                    create: attachments.map((a: {
-                      url: string;
-                      type: 'IMAGE' | 'VIDEO' | 'FILE';
-                      filename?: string;
-                      mimeType?: string;
-                      size?: number;
-                      width?: number;
-                      height?: number;
-                      durationMs?: number;
-                    }) => ({
-                      url: a.url,
-                      type: a.type,
-                      filename: a.filename || '',
-                      mimeType: a.mimeType || '',
-                      size: a.size || 0,
-                      width: a.width,
-                      height: a.height,
-                      durationMs: a.durationMs,
-                    })),
+                    create: attachments.map(
+                      (a: {
+                        url: string;
+                        type: 'IMAGE' | 'VIDEO' | 'FILE';
+                        filename?: string;
+                        mimeType?: string;
+                        size?: number;
+                        width?: number;
+                        height?: number;
+                        durationMs?: number;
+                      }) => ({
+                        url: a.url,
+                        type: a.type,
+                        filename: a.filename || '',
+                        mimeType: a.mimeType || '',
+                        size: a.size || 0,
+                        width: a.width,
+                        height: a.height,
+                        durationMs: a.durationMs,
+                      })
+                    ),
                   }
                 : undefined,
           },

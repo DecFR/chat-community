@@ -39,6 +39,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   login: async (username, password) => {
     try {
       set({ isLoading: true });
+      // 断开已有的 socket 连接，避免在登录时产生自我冲突的旧连接被踢下线
+      try { socketService.disconnect(); } catch (e) { /* ignore */ }
       const response = await authAPI.login({ username, password });
       const { user, token } = response.data.data;
 
@@ -56,6 +58,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   register: async (username, password, email, inviteCode) => {
     try {
       set({ isLoading: true });
+      // 断开已有 socket 连接，避免并发连接导致的冲突
+      try { socketService.disconnect(); } catch (e) { /* ignore */ }
       const response = await authAPI.register({ username, password, email, inviteCode });
       const { user, token } = response.data.data;
 

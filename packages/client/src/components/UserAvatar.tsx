@@ -62,11 +62,13 @@ export const UserAvatar: React.FC<UserAvatarProps> = ({
     if (url.startsWith('data:') || url.startsWith('blob:')) return url;
     // 如果是完整URL，直接返回
     if (url.startsWith('http://') || url.startsWith('https://')) return url;
-    // 如果是相对路径，补全API_URL
-    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-    const baseUrl = API_URL.endsWith('/api') ? API_URL.replace('/api', '') : API_URL; // 移除 /api 后缀
-    // 兼容缺少前导斜杠的路径
+    // 如果是相对路径，补全 API_URL；当 VITE_API_URL 为空字符串时使用相对路径（避免回退到 localhost）
+    const API_URL = import.meta.env.VITE_API_URL ?? '';
     const normalized = url.startsWith('/') ? url : `/${url}`;
+    if (!API_URL) {
+      return normalized; // 使用相对路径
+    }
+    const baseUrl = API_URL.endsWith('/api') ? API_URL.replace('/api', '') : API_URL; // 移除 /api 后缀
     return `${baseUrl}${normalized}`;
   };
 

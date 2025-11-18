@@ -65,7 +65,7 @@ export const friendController = {
           status: friendship.receiver.status,
         },
       });
-      
+
       // 也通知接受者本人更新好友列表
       io.to(`user-${userId}`).emit('friendRequestAccepted', {
         friendshipId: friendship.id,

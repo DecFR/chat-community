@@ -1,9 +1,10 @@
 import axios from 'axios';
 
-// 统一 API 基址：确保恰好包含一次 /api
-const RAW_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-const BASE_NO_API = RAW_BASE.replace(/\/?api\/?$/i, '');
-const API_URL = `${BASE_NO_API.replace(/\/$/, '')}/api`;
+// 统一 API 基址：支持空字符串（表示使用相对 `/api`）
+const RAW_BASE = import.meta.env.VITE_API_URL ?? '';
+const API_URL = RAW_BASE
+  ? `${RAW_BASE.replace(/\/?api\/?$/i, '').replace(/\/$/, '')}/api`
+  : '/api';
 
 export const api = axios.create({
   baseURL: API_URL,
@@ -30,7 +31,12 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    const status = error.response?.status;
+    const requestUrl: string = error.config?.url ?? '';
+    // 如果是认证相关的请求（登录/注册/获取当前用户），不要在 401 时自动重定向到登录页，
+    // 否则会在登录失败时导致页面刷新、错误提示闪烁。
+    const isAuthEndpoint = /\/auth\/(login|register|me)/i.test(requestUrl);
+    if (status === 401 && !isAuthEndpoint) {
       localStorage.removeItem('token');
       window.location.href = '/login';
     }
