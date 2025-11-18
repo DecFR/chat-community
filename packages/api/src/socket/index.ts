@@ -85,31 +85,39 @@ export function initializeSocket(httpServer: HttpServer) {
 
       // 检查是否有其他活跃的Socket连接（单点登录控制）
       if (session.socketId && session.socketId !== socket.id) {
-        // 仅向旧的 socketId 发送 forceLogout，而不是广播到整个用户房间，避免把本次连接也误踢
+        // 仅向旧的 socketId 发送 forceLogout：先确认旧 ID 是真实的 socket id，
+        // 避免把用户房间名（例如 `user-<id>`）误当作 socket id 广播到所有设备。
         const oldSocketId = session.socketId;
         try {
-          io.to(oldSocketId).emit('forceLogout', {
-            reason: 'new_login',
-            message: '您的账号在其他设备登录',
-          });
-
-          // 如果能拿到旧的 socket 实例，尝试断开它以释放资源
           const socketsMap = io.sockets.sockets as Map<string, Socket>;
-          const oldSocket = socketsMap.get(oldSocketId);
-          if (oldSocket && typeof oldSocket.disconnect === 'function') {
-            try {
-              oldSocket.disconnect(true);
-            } catch (e) {
-              logger.debug('Failed to forcibly disconnect old socket:', e);
+          // 仅当旧 socketId 在当前 socket 列表中存在时才发送强制登出
+          if (socketsMap.has(oldSocketId)) {
+            io.to(oldSocketId).emit('forceLogout', {
+              reason: 'new_login',
+              message: '您的账号在其他设备登录',
+            });
+
+            const oldSocket = socketsMap.get(oldSocketId);
+            if (oldSocket && typeof oldSocket.disconnect === 'function') {
+              try {
+                oldSocket.disconnect(true);
+              } catch (e) {
+                logger.debug('Failed to forcibly disconnect old socket:', e);
+              }
             }
+
+            logger.info(
+              `User ${socket.username} logged in from new device, kicking out old socket ${oldSocketId}`
+            );
+          } else {
+            // 旧的 socketId 不在当前实例中，可能是房间名或过期 id，跳过以避免误广播
+            logger.debug(
+              `Old socketId ${oldSocketId} for user ${socket.username} not found among active sockets; skipping forceLogout emit.`
+            );
           }
         } catch (e) {
           logger.error('Error notifying old socket about forceLogout:', e);
         }
-
-        logger.info(
-          `User ${socket.username} logged in from new device, kicking out old socket ${oldSocketId}`
-        );
       }
 
       // 更新会话的Socket ID和活跃时间
