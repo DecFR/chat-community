@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
 import prisma from '../utils/prisma.js';
+import { getIO } from '../socket/index.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
 const SALT_ROUNDS = 10;
@@ -155,6 +156,36 @@ export const authService = {
 
     // 如果存在活跃会话，删除旧会话（强制单点登录）
     if (existingSessions.length > 0) {
+      try {
+        const io = getIO();
+        const socketsMap = io.sockets.sockets as Map<string, any>;
+
+        // 通知并断开旧的 socket（如果真实存在）
+        for (const s of existingSessions) {
+          const oldSocketId = s.socketId;
+          if (oldSocketId && socketsMap.has(oldSocketId)) {
+            try {
+              io.to(oldSocketId).emit('forceLogout', {
+                reason: 'new_login',
+                message: '您的账号在其他设备登录',
+              });
+              const oldSocket = socketsMap.get(oldSocketId);
+              if (oldSocket && typeof oldSocket.disconnect === 'function') {
+                try {
+                  oldSocket.disconnect(true);
+                } catch (e) {
+                  // 忽略断开错误
+                }
+              }
+            } catch (e) {
+              // 忽略通知错误，继续删除会话
+            }
+          }
+        }
+      } catch (e) {
+        // 如果 io 未初始化或其他错误，继续删除会话以保证登录流程
+      }
+
       await prisma.userSession.deleteMany({
         where: {
           userId: user.id,
