@@ -153,16 +153,22 @@ export const authService = {
         userId: user.id,
         expiresAt: { gt: new Date() },
       },
+      orderBy: { createdAt: 'asc' }, // 先拿最旧的会话
     });
 
-    // 如果存在活跃会话，删除旧会话（强制单点登录）
-    if (existingSessions.length > 0) {
+    // 支持最多并发会话数（可通过环境变量调整），默认允许 2 个并发会话
+    const MAX_CONCURRENT_SESSIONS = Number(process.env.MAX_CONCURRENT_SESSIONS || 2);
+
+    // 需要删除的旧会话数量（使得在创建新会话后，总数不超过 MAX）
+    const toDeleteCount = Math.max(0, existingSessions.length - (MAX_CONCURRENT_SESSIONS - 1));
+
+    if (toDeleteCount > 0) {
+      const sessionsToDelete = existingSessions.slice(0, toDeleteCount);
       try {
         const io = getIO();
         const socketsMap = io.sockets.sockets as Map<string, any>;
 
-        // 通知并断开旧的 socket（如果真实存在）—并记录日志以便排查
-        for (const s of existingSessions) {
+        for (const s of sessionsToDelete) {
           const oldSocketId = s.socketId;
           if (oldSocketId) {
             const found = socketsMap.has(oldSocketId);
@@ -196,11 +202,8 @@ export const authService = {
         // 如果 io 未初始化或其他错误，继续删除会话以保证登录流程
       }
 
-      await prisma.userSession.deleteMany({
-        where: {
-          userId: user.id,
-        },
-      });
+      const idsToDelete = sessionsToDelete.map((s) => s.id);
+      await prisma.userSession.deleteMany({ where: { id: { in: idsToDelete } } });
     }
 
     // 创建新会话记录

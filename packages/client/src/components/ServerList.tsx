@@ -69,6 +69,12 @@ export default function ServerList() {
     }
     
     selectServer(serverId);
+    // 按需加入服务器房间，保证进入服务器后能接收频道消息
+    try {
+      socketService.joinServer(serverId);
+    } catch (e) {
+      // ignore
+    }
     navigate(`/app/channel/${server.channels[0].id}`);
   };
 

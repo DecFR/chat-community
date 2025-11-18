@@ -111,19 +111,10 @@ export default function MainLayout() {
 
   // 当服务器加载完成后，立即加入所有服务器房间
   useEffect(() => {
-    if (!isServersLoaded || servers.length === 0) return;
-    
-    console.log('[MainLayout] Servers loaded, joining all server rooms');
-    const serverIds = servers.map(s => s.id).filter(Boolean);
-    socketService.joinServers(serverIds);
-    
-    // 设置Socket重连回调，重连后自动重新加入所有房间
-    socketService.setReconnectCallback(() => {
-      console.log('[MainLayout] Socket reconnected, rejoining all server rooms');
-      const { servers } = useServerStore.getState();
-      const serverIds = servers.map(s => s.id).filter(Boolean);
-      socketService.joinServers(serverIds);
-    });
+    // 不再在连接时自动加入所有服务器房间；
+    // 改为在用户点击某个服务器时由客户端按需调用 socketService.joinServer(serverId)，
+    // 这样可以显著降低连接时的房间开销并按需加入。
+    return;
   }, [isServersLoaded, servers]);
 
   // 监听服务器和频道变化,实时更新
@@ -163,6 +154,27 @@ export default function MainLayout() {
       selectServer('');
     }
   }, [location.pathname, selectServer]);
+
+  // 当直接访问频道路由时，自动 join 对应服务器的 socket 房间（按需加入）
+  useEffect(() => {
+    if (!user || !isAuthenticated) return;
+    const path = location.pathname;
+    if (!path.startsWith('/app/channel/')) return;
+    const parts = path.split('/');
+    const channelId = parts[parts.length - 1];
+    if (!channelId) return;
+
+    // 查找该频道所属服务器并 join
+    const server = servers.find((s) => (s.channels || []).some((c) => c.id === channelId));
+    if (server) {
+      try {
+        socketService.joinServer(server.id);
+        selectServer(server.id);
+      } catch (e) {
+        // ignore
+      }
+    }
+  }, [location.pathname, user, isAuthenticated, servers, selectServer]);
 
   // 监听自身资料更新（头像、昵称）以便全局同步
   useEffect(() => {

@@ -152,20 +152,10 @@ export function initializeSocket(httpServer: HttpServer) {
     // 通知好友用户上线
     await notifyFriendsStatus(socket.userId!, 'ONLINE');
 
-    // 加入所有服务器房间(包括成员服务器和公共服务器)
-    // 优化：仅加入当前用户已加入的服务器房间，避免规模增大时无关房间占用内存
-    const memberships: { serverId: string }[] = await prisma.serverMember.findMany({
-      where: { userId: socket.userId },
-      select: { serverId: true },
-    });
-
-    // 立即加入所有服务器房间，确保用户能接收到频道消息
-    memberships.forEach((m: { serverId: string }) => {
-      socket.join(`server-${m.serverId}`);
-      logger.debug(`User ${socket.username} auto-joined server room: server-${m.serverId}`);
-    });
-
-    logger.info(`User ${socket.username} joined ${memberships.length} server rooms`);
+    // 仅加入个人房间，服务器房间在用户点击/进入服务器时按需 join
+    // 这样能避免在用户加入大量服务器时占用过多 socket 房间资源，
+    // 同时我们会在消息发送处对未加入服务器房间的成员使用个人房间推送通知。
+    logger.debug(`User ${socket.username} joined personal room only`);
 
     // 通知所有服务器成员列表更新
     const userServers = await prisma.serverMember.findMany({
@@ -407,10 +397,44 @@ export function initializeSocket(httpServer: HttpServer) {
           authorId: socket.userId!,
         };
 
-        // 广播到服务器房间
+        // 广播到服务器房间（对已加入该房间的客户端）
         io.to(`server-${message.channel?.serverId}`).emit('channelMessage', decryptedMessage);
-        // 额外发给发送者的个人房间，避免未加入服务器房间时看不到自己的消息
-        io.to(`user-${socket.userId}`).emit('channelMessage', decryptedMessage);
+
+        // 额外：对那些未加入服务器房间的在线成员，使用个人房间发送消息通知，保证他们也能实时收到消息（例如收到未读提醒或消息预览）
+        try {
+          const serverId = message.channel?.serverId;
+          if (serverId) {
+            const members = await prisma.serverMember.findMany({ where: { serverId }, select: { userId: true } });
+            const memberIds = members.map((m) => m.userId);
+
+            // 获取这些成员的活跃 session（包含 socketId）
+            const sessions = await prisma.userSession.findMany({
+              where: {
+                userId: { in: memberIds },
+                expiresAt: { gt: new Date() },
+              },
+              select: { userId: true, socketId: true },
+            });
+
+            const socketsMap = io.sockets.sockets as Map<string, Socket>;
+
+            for (const s of sessions) {
+              const memberId = s.userId;
+              const sid = s.socketId;
+              if (!sid) continue;
+
+              const sock = socketsMap.get(sid);
+              const alreadyInServerRoom = sock && sock.rooms && typeof sock.rooms.has === 'function' && sock.rooms.has(`server-${serverId}`);
+
+              // 如果该成员没有加入服务器房间，则发送个人房间消息
+              if (!alreadyInServerRoom) {
+                io.to(`user-${memberId}`).emit('channelMessage', decryptedMessage);
+              }
+            }
+          }
+        } catch (err) {
+          logger.error('Error notifying members via personal rooms:', err);
+        }
         lastMessageAt.set(socket.userId!, now);
       } catch (error) {
         logger.error('Error sending channel message:', { error });
