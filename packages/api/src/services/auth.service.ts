@@ -147,64 +147,16 @@ export const authService = {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7);
 
-    // 查找用户的所有活跃会话
+    // 查找用户的所有活跃会话（保留记录，但不再限制并发设备数）
+    // 关闭设备限制：不删除旧会话，也不向旧 socket 发送 forceLogout。
+    // 这样允许用户在多个设备/浏览器同时在线。保留会话以便后续审计或会话管理。
     const existingSessions = await prisma.userSession.findMany({
       where: {
         userId: user.id,
         expiresAt: { gt: new Date() },
       },
-      orderBy: { createdAt: 'asc' }, // 先拿最旧的会话
+      orderBy: { createdAt: 'asc' },
     });
-
-    // 支持最多并发会话数（可通过环境变量调整），默认允许 2 个并发会话
-    const MAX_CONCURRENT_SESSIONS = Number(process.env.MAX_CONCURRENT_SESSIONS || 2);
-
-    // 需要删除的旧会话数量（使得在创建新会话后，总数不超过 MAX）
-    const toDeleteCount = Math.max(0, existingSessions.length - (MAX_CONCURRENT_SESSIONS - 1));
-
-    if (toDeleteCount > 0) {
-      const sessionsToDelete = existingSessions.slice(0, toDeleteCount);
-      try {
-        const io = getIO();
-        const socketsMap = io.sockets.sockets as Map<string, any>;
-
-        for (const s of sessionsToDelete) {
-          const oldSocketId = s.socketId;
-          if (oldSocketId) {
-            const found = socketsMap.has(oldSocketId);
-            try {
-              logger.info(`auth.login forceLogout: user=${user.username} sessionId=${s.id} oldSocketId=${oldSocketId} found=${found}`);
-            } catch (e) {
-              // ignore logging errors
-            }
-
-            if (found) {
-              try {
-                io.to(oldSocketId).emit('forceLogout', {
-                  reason: 'new_login',
-                  message: '您的账号在其他设备登录',
-                });
-                const oldSocket = socketsMap.get(oldSocketId);
-                if (oldSocket && typeof oldSocket.disconnect === 'function') {
-                  try {
-                    oldSocket.disconnect(true);
-                  } catch (e) {
-                    // 忽略断开错误
-                  }
-                }
-              } catch (e) {
-                // 忽略通知错误，继续删除会话
-              }
-            }
-          }
-        }
-      } catch (e) {
-        // 如果 io 未初始化或其他错误，继续删除会话以保证登录流程
-      }
-
-      const idsToDelete = sessionsToDelete.map((s) => s.id);
-      await prisma.userSession.deleteMany({ where: { id: { in: idsToDelete } } });
-    }
 
     // 创建新会话记录
     await prisma.userSession.create({
