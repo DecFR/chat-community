@@ -60,7 +60,9 @@ export default function MainLayout() {
   const [showSettings, setShowSettings] = useState(false);
   const { incrementChannel, incrementDM, setChannelCount, setDMCount } = useUnreadStore();
 
-  const isChatView = location.pathname.startsWith('/app/channel/') || location.pathname.startsWith('/app/dm/');
+  const isChatView = location.pathname.startsWith('/app/channel/') || 
+                   location.pathname.startsWith('/app/dm/') || 
+                   location.pathname.startsWith('/app/admin');
 
   // 初始未读加载
   useEffect(() => {
