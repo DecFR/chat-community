@@ -1,4 +1,4 @@
-import { useEffect, useState, type SyntheticEvent } from 'react';
+import { useEffect, useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useServerStore } from '../stores/serverStore';
@@ -252,27 +252,37 @@ export default function MainLayout() {
     );
   }
 
-  return (
+    return (
     <div className="h-screen flex bg-discord-dark overflow-hidden relative w-full">
-      {/* 侧边栏容器 */}
-      <div className={`flex h-full shrink-0 ${isChatView ? 'hidden md:flex' : 'flex w-full md:w-auto'}`}>
-        <ServerList />
+      {/* 
+        🟢 修复列表挤压：
+        1. shrink-0: 禁止 flex 压缩
+        2. overflow-hidden: 防止内部溢出
+      */}
+      <div className={`flex h-full shrink-0 overflow-hidden ${isChatView ? 'hidden md:flex' : 'flex w-full md:w-auto'}`}>
+        
+        {/* ServerList 组件内部通常是固定宽度的，但加个 div 包裹更保险 */}
+        <div className="shrink-0 h-full">
+          <ServerList />
+        </div>
         
         {!(location.pathname.startsWith('/app/admin')) && (
-          <div className="w-full md:w-60 flex flex-col border-r border-discord-darkest bg-discord-gray">
+          <div className="w-full md:w-60 flex flex-col border-r border-discord-darkest bg-discord-gray shrink-0">
              <ChannelList />
-             {/* 手机端底部导航 */}
-             <div className="h-14 bg-discord-darker flex items-center justify-around px-4 border-t border-discord-darkest md:hidden mt-auto">
+             
+             {/* 底部导航栏 (Settings 按钮修复) */}
+             <div className="h-14 bg-discord-darker flex items-center justify-around px-4 border-t border-discord-darkest md:hidden mt-auto shrink-0">
                <NotificationCenter />
-               <button onClick={() => setShowSettings(true)} className="p-2 rounded hover:bg-discord-gray">
-                 <img 
-                   src={user.avatarUrl || undefined} 
-                   className="w-8 h-8 rounded-full bg-gray-600 object-cover"
-                   alt={user.username}
-                   onError={(e: SyntheticEvent<HTMLImageElement, Event>) => (e.currentTarget.style.display = 'none')}
-                 />
-                 {!user.avatarUrl && (
-                   <div className="w-8 h-8 rounded-full bg-gray-600 flex items-center justify-center text-white font-bold">
+               <button onClick={() => setShowSettings(true)} className="p-2 rounded hover:bg-discord-gray group">
+                 {/* 🟢 修复头像显示：严格判断，避免裂图 */}
+                 {user.avatarUrl ? (
+                   <img 
+                     src={user.avatarUrl} 
+                     className="w-8 h-8 rounded-full bg-gray-600 object-cover border border-transparent group-hover:border-gray-400"
+                     alt={user.username}
+                   />
+                 ) : (
+                   <div className="w-8 h-8 rounded-full bg-discord-blue flex items-center justify-center text-white font-bold text-xs group-hover:bg-discord-blue-hover">
                      {user.username.substring(0, 2).toUpperCase()}
                    </div>
                  )}
@@ -284,6 +294,7 @@ export default function MainLayout() {
 
       {/* 主内容区域 */}
       <div className={`flex-1 flex flex-col min-h-0 min-w-0 bg-discord-gray ${isChatView ? 'flex z-20 absolute inset-0 md:static md:z-0' : 'hidden md:flex'}`}>
+        {/* ... (顶部栏保持不变) */}
         <div className="hidden md:flex h-12 bg-discord-darker border-b border-discord-darkest items-center justify-end px-4 gap-2 shrink-0">
           <NotificationCenter />
           <button onClick={() => setShowSettings(true)} className="p-2 rounded hover:bg-discord-gray transition-colors" title="用户设置">
