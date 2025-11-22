@@ -53,8 +53,8 @@ router.post('/upload-chunk', authMiddleware, uploadChunk.single('chunk'), async 
 });
 
 // 合并分片接口
-// 限制单个完整文件最大 2GB
-const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024; // 2GB
+// 限制单个完整文件最大 3GB
+const MAX_FILE_SIZE = 3 * 1024 * 1024 * 1024; // 3GB
 
 router.post('/merge-chunks', authMiddleware, async (req, res) => {
   try {
@@ -72,7 +72,7 @@ router.post('/merge-chunks', authMiddleware, async (req, res) => {
       const stat = fs.statSync(chunkPath);
       totalSize += stat.size;
       if (totalSize > MAX_FILE_SIZE) {
-        return res.status(400).json({ success: false, error: '文件超过允许的最大大小 2GB' });
+        return res.status(400).json({ success: false, error: '文件超过允许的最大大小 3GB' });
       }
     }
 
