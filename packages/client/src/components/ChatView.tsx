@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom'; // 🟢 新增 useNavigate
+import { useParams, useNavigate } from 'react-router-dom'; // 🟢 修复：引入 useNavigate
 import { useServerStore } from '../stores/serverStore';
 import { useFriendStore } from '../stores/friendStore';
 import { useAuthStore } from '../stores/authStore';
@@ -43,9 +43,18 @@ interface MessageWithKey extends Message {
   _key?: string;
 }
 
+// 文件大小格式化工具
+const formatFileSize = (bytes: number | undefined) => {
+  if (!bytes || bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+};
+
 export default function ChatView({ isDM = false }: ChatViewProps) {
   const { channelId, friendId } = useParams();
-  const navigate = useNavigate(); // 🟢 路由跳转
+  const navigate = useNavigate(); // 🟢 修复：声明 navigate
   const { servers, isLoading: isLoadingServers } = useServerStore();
   const { friends } = useFriendStore();
   const { user } = useAuthStore();
@@ -56,6 +65,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
 
   // 媒体预览状态
   const [previewMedia, setPreviewMedia] = useState<{ url: string; type: 'IMAGE' | 'VIDEO' } | null>(null);
+  
   const lastTypingEmitTimeRef = useRef<number>(0);
 
   let currentChannel = null;
@@ -82,7 +92,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
   const progressValue = typeof uploadProgress === 'number' ? uploadProgress : 0;
   const inputClass = `flex-1 px-2 py-3 bg-transparent text-white placeholder-gray-500 focus:outline-none${rateLimitWaitMs > 0 ? ' opacity-60 cursor-not-allowed' : ''}`;
 
-  const getMediaUrl = (url: string | null | undefined): string => {
+  const getMediaUrl = useCallback((url: string | null | undefined): string => {
     if (!url) return '';
     if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
       return url;
@@ -91,9 +101,9 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
     const normalized = url.startsWith('/') ? url : `/${url}`;
     if (!API_URL) return normalized;
     return `${API_URL}${normalized}`;
-  };
+  }, []);
 
-  const getFileType = (att: { type: string; filename?: string; mimeType?: string }) => {
+  const getFileType = useCallback((att: { type: string; filename?: string; mimeType?: string }) => {
     if (att.type === 'IMAGE') return 'IMAGE';
     if (att.type === 'VIDEO') return 'VIDEO';
     const name = (att.filename || '').toLowerCase();
@@ -101,18 +111,22 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
     if (mime.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|bmp|svg)$/.test(name)) return 'IMAGE';
     if (mime.startsWith('video/') || /\.(mp4|webm|ogg|mov|mkv)$/.test(name)) return 'VIDEO';
     return 'FILE';
-  };
+  }, []);
 
   useEffect(() => {
     if (!isDM) {
       const sock = socketService.getSocket();
       const prev = prevChannelRef.current;
-      if (prev && prev !== channelId) sock?.emit('leaveChannel', { channelId: prev });
+      if (prev && prev !== channelId) {
+        sock?.emit('leaveChannel', { channelId: prev });
+      }
       if (channelId) {
         sock?.emit('joinChannel', { channelId });
         prevChannelRef.current = channelId;
       }
-      return () => { if (channelId) sock?.emit('leaveChannel', { channelId }); };
+      return () => {
+        if (channelId) sock?.emit('leaveChannel', { channelId });
+      };
     }
   }, [isDM, channelId]);
 
@@ -142,7 +156,9 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
   const [uploadFileName, setUploadFileName] = useState<string | null>(null);
   const toastStore = useToastStore();
 
-  const scrollToBottom = () => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); };
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
 
   useEffect(() => {
     const targetId = isDM ? friendId : channelId;
@@ -173,7 +189,10 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
       const mySeq = ++loadSeqRef.current;
       const targetId = isDM ? friendId : channelId;
       if (!targetId) {
-        setMessages([]); setDmConversationId(null); lastLoadedTargetRef.current = ''; return;
+        setMessages([]);
+        setDmConversationId(null);
+        lastLoadedTargetRef.current = '';
+        return;
       }
       if (lastLoadedTargetRef.current === targetId && messages.length > 0) return;
       lastLoadedTargetRef.current = targetId;
@@ -186,32 +205,49 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
           const conversationId = stateResponse.data.data?.conversationId;
           setDmConversationId(conversationId || null);
           if (!conversationId) {
-            setMessages([]); setHasMore(false);
+            setMessages([]);
+            setHasMore(false);
           } else {
             const res = await messageAPI.getConversationMessages(conversationId, 50);
             const loaded = (res.data.data || []) as Message[];
             const uniqueMap = new Map<string, Message>();
-            loaded.forEach((m, idx) => { const key = m.id || `temp-${idx}-${Date.now()}`; (m as MessageWithKey)._key = key; uniqueMap.set(key, m); });
+            loaded.forEach((m: Message, idx) => {
+              const key = m.id || `temp-${idx}-${Date.now()}-${Math.random()}`;
+              (m as MessageWithKey)._key = key;
+              uniqueMap.set(key, m);
+            });
             const list = Array.from(uniqueMap.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
             if (mySeq === loadSeqRef.current) setMessages(list);
             setHasMore(loaded.length === 50);
-            if (savedLastRead) { const idx = list.findIndex(m => m.id === savedLastRead || (m as MessageWithKey)._key === savedLastRead); setFirstUnreadIndex(idx >= 0 ? idx + 1 : null); }
+            if (savedLastRead) {
+              const idx = list.findIndex(m => m.id === savedLastRead || (m as MessageWithKey)._key === savedLastRead);
+              setFirstUnreadIndex(idx >= 0 ? idx + 1 : null);
+            }
           }
         } else if (channelId) {
           const res = await messageAPI.getChannelMessages(channelId, 50);
           const loaded = (res.data.data || []) as Message[];
           const uniqueMap = new Map<string, Message>();
-          loaded.forEach((m, idx) => { const key = m.id || `temp-${idx}-${Date.now()}`; (m as MessageWithKey)._key = key; uniqueMap.set(key, m); });
+          loaded.forEach((m: Message, idx) => {
+            const key = m.id || `temp-${idx}-${Date.now()}-${Math.random()}`;
+            (m as MessageWithKey)._key = key;
+            uniqueMap.set(key, m);
+          });
           const list = Array.from(uniqueMap.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
           if (mySeq === loadSeqRef.current) setMessages(list);
           setHasMore(loaded.length === 50);
           const stateRes = await messageAPI.getChannelState(channelId);
           const serverLastRead = stateRes.data.data?.lastReadMessageId as string | undefined;
           const effectiveLastRead = savedLastRead || serverLastRead;
-          if (effectiveLastRead) { const idx = list.findIndex(m => m.id === effectiveLastRead || (m as MessageWithKey)._key === effectiveLastRead); setFirstUnreadIndex(idx >= 0 ? idx + 1 : null); }
+          if (effectiveLastRead) {
+            const idx = list.findIndex(m => m.id === effectiveLastRead || (m as MessageWithKey)._key === effectiveLastRead);
+            setFirstUnreadIndex(idx >= 0 ? idx + 1 : null);
+          }
         }
         setTimeout(() => scrollToBottom(), 100);
-      } finally { setIsLoading(false); }
+      } finally {
+        setIsLoading(false);
+      }
     };
     loadMessages();
   }, [isDM, friendId, channelId, user?.id, messages.length]);
@@ -229,42 +265,79 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
           conversationId = stateRes.data.data.conversationId;
           setDmConversationId(conversationId || null);
         }
-        if (!conversationId) { setIsLoadingMore(false); return; }
+        if (!conversationId) {
+          setIsLoadingMore(false);
+          return;
+        }
         response = await messageAPI.getConversationMessages(conversationId, 50, oldestMessage.id);
       } else if (channelId) {
         response = await messageAPI.getChannelMessages(channelId, 50, oldestMessage.id);
-      } else { setIsLoadingMore(false); return; }
+      } else {
+        setIsLoadingMore(false);
+        return;
+      }
       const olderMessages = response.data.data;
       if (olderMessages.length > 0) {
         const container = messagesContainerRef.current;
         const scrollHeightBefore = container?.scrollHeight || 0;
         setMessages((prev) => {
-          const merged = [...olderMessages, ...prev];
+          const merged: Message[] = [...olderMessages, ...prev];
           const uniqueMap = new Map<string, Message>();
-          merged.forEach((m, idx) => { const key = m.id || (m as MessageWithKey)._key || `temp-${idx}-${Date.now()}`; (m as MessageWithKey)._key = key; uniqueMap.set(key, m); });
+          merged.forEach((m: Message, idx) => {
+            const key = m.id || (m as MessageWithKey)._key || `temp-${idx}-${Date.now()}-${Math.random()}`;
+            (m as MessageWithKey)._key = key;
+            uniqueMap.set(key, m);
+          });
           return Array.from(uniqueMap.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
         });
         setHasMore(olderMessages.length === 50);
-        setTimeout(() => { if (container) container.scrollTop = container.scrollHeight - scrollHeightBefore; }, 0);
-      } else { setHasMore(false); }
-    } catch (error) { console.error('Failed to load more:', error); } finally { setIsLoadingMore(false); }
+        setTimeout(() => {
+          if (container) {
+            const scrollHeightAfter = container.scrollHeight;
+            container.scrollTop = scrollHeightAfter - scrollHeightBefore;
+          }
+        }, 0);
+      } else {
+        setHasMore(false);
+      }
+    } catch (error) {
+      console.error('Failed to load more messages:', error);
+    } finally {
+      setIsLoadingMore(false);
+    }
   }, [isLoadingMore, hasMore, messages, isDM, friendId, channelId, dmConversationId]);
 
   useEffect(() => {
     if (isDM) {
       const sock = socketService.getSocket();
       const prev = prevConversationRef.current;
-      if (prev && prev !== dmConversationId) sock?.emit('leaveConversation', { conversationId: prev });
-      if (dmConversationId) { sock?.emit('joinConversation', { conversationId: dmConversationId }); prevConversationRef.current = dmConversationId; }
-      return () => { if (dmConversationId) sock?.emit('leaveConversation', { conversationId: dmConversationId }); };
+      if (prev && prev !== dmConversationId) {
+        sock?.emit('leaveConversation', { conversationId: prev });
+      }
+      if (dmConversationId) {
+        sock?.emit('joinConversation', { conversationId: dmConversationId });
+        prevConversationRef.current = dmConversationId;
+      }
+      return () => {
+        if (dmConversationId) sock?.emit('leaveConversation', { conversationId: dmConversationId });
+      };
     }
   }, [isDM, dmConversationId]);
 
   useEffect(() => {
-    const observer = new IntersectionObserver((entries) => { if (entries[0].isIntersecting && hasMore && !isLoadingMore) loadMoreMessages(); }, { threshold: 1.0 });
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !isLoadingMore) {
+          loadMoreMessages();
+        }
+      },
+      { threshold: 1.0 }
+    );
     const trigger = loadMoreTriggerRef.current;
     if (trigger) observer.observe(trigger);
-    return () => { if (trigger) observer.unobserve(trigger); };
+    return () => {
+      if (trigger) observer.unobserve(trigger);
+    };
   }, [hasMore, isLoadingMore, loadMoreMessages]);
 
   useEffect(() => {
@@ -272,8 +345,12 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
     if (!container) return;
     const handleScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = container;
-      setIsNearBottom(scrollHeight - scrollTop - clientHeight < 100);
-      if (scrollHeight - scrollTop - clientHeight < 100 && messages.length > 0) markAsRead();
+      const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+      const nearBottom = distanceFromBottom < 100;
+      setIsNearBottom(nearBottom);
+      if (nearBottom && messages.length > 0) {
+        markAsRead();
+      }
     };
     container.addEventListener('scroll', handleScroll);
     return () => container.removeEventListener('scroll', handleScroll);
@@ -282,6 +359,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
   useEffect(() => {
     const targetId = isDM ? friendId : channelId;
     if (!targetId) return;
+    const currentUserId = user?.id;
     const socket = socketService.getSocket();
     if (!socket) return;
 
@@ -292,28 +370,49 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
           if (exists) return prev;
           const merged = [...prev, message];
           const uniq = new Map<string, Message>();
-          merged.forEach((m, idx) => { const key = (m as MessageWithKey)._key || m.id || `temp-${idx}-${Date.now()}`; (m as MessageWithKey)._key = key; uniq.set(key, m); });
+          merged.forEach((m: Message, idx) => {
+            const key = (m as MessageWithKey)._key || m.id || `temp-${idx}-${Date.now()}-${Math.random()}`;
+            (m as MessageWithKey)._key = key;
+            uniq.set(key, m);
+          });
           return Array.from(uniq.values());
         });
-        setTimeout(() => scrollToBottom(), 100); setTimeout(() => markAsRead(), 500);
-      }
-    };
-    const handleDirectMessage = (message: Message & { directMessageConversationId?: string }) => {
-      if (isDM && friendId && (message.authorId === user?.id || message.authorId === friendId)) {
-        setMessages((prev) => {
-          const exists = prev.some(m => (m as MessageWithKey)._key ? (m as MessageWithKey)._key === ((message as MessageWithKey)._key || message.id) : m.id === message.id);
-          if (exists) return prev;
-          const merged = [...prev, message];
-          const uniq = new Map<string, Message>();
-          merged.forEach((m, idx) => { const key = (m as MessageWithKey)._key || m.id || `temp-${idx}-${Date.now()}`; (m as MessageWithKey)._key = key; uniq.set(key, m); });
-          return Array.from(uniq.values());
-        });
-        setTimeout(() => scrollToBottom(), 100); setTimeout(() => markAsRead(), 500);
+        setTimeout(() => scrollToBottom(), 100);
+        setTimeout(() => markAsRead(), 500);
       }
     };
 
-    socket.off('channelMessage'); socket.off('directMessage'); socket.off('friendProfileUpdate'); socket.off('userProfileUpdate'); socket.off('messageRateLimited');
-    socket.on('channelMessage', handleNewMessage); socket.on('directMessage', handleDirectMessage);
+    const handleDirectMessage = (message: Message & { directMessageConversationId?: string }) => {
+      if (isDM && friendId) {
+        const isMyMessage = message.authorId === currentUserId;
+        const isFriendMessage = message.authorId === friendId;
+        if (isMyMessage || isFriendMessage) {
+          setMessages((prev) => {
+            const exists = prev.some(m => (m as MessageWithKey)._key ? (m as MessageWithKey)._key === ((message as MessageWithKey)._key || message.id) : m.id === message.id);
+            if (exists) return prev;
+            const merged = [...prev, message];
+            const uniq = new Map<string, Message>();
+            merged.forEach((m: Message, idx) => {
+              const key = (m as MessageWithKey)._key || m.id || `temp-${idx}-${Date.now()}-${Math.random()}`;
+              (m as MessageWithKey)._key = key;
+              uniq.set(key, m);
+            });
+            return Array.from(uniq.values());
+          });
+          setTimeout(() => scrollToBottom(), 100);
+          setTimeout(() => markAsRead(), 500);
+        }
+      }
+    };
+
+    socket.off('channelMessage');
+    socket.off('directMessage');
+    socket.off('friendProfileUpdate');
+    socket.off('userProfileUpdate');
+    socket.off('messageRateLimited');
+    
+    socket.on('channelMessage', handleNewMessage);
+    socket.on('directMessage', handleDirectMessage);
 
     const handleRateLimited = (data: { waitMs: number }) => {
       if (data.waitMs > 0) {
@@ -321,29 +420,58 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
         if (rateLimitTimerRef.current) window.clearInterval(rateLimitTimerRef.current);
         const start = Date.now();
         rateLimitTimerRef.current = window.setInterval(() => {
-          const elapsed = Date.now() - start; const remain = data.waitMs - elapsed;
-          if (remain <= 0) { setRateLimitWaitMs(0); if (rateLimitTimerRef.current) window.clearInterval(rateLimitTimerRef.current); rateLimitTimerRef.current = null; } else { setRateLimitWaitMs(remain); }
+          const elapsed = Date.now() - start;
+          const remain = data.waitMs - elapsed;
+          if (remain <= 0) {
+            setRateLimitWaitMs(0);
+            if (rateLimitTimerRef.current) window.clearInterval(rateLimitTimerRef.current);
+            rateLimitTimerRef.current = null;
+          } else {
+            setRateLimitWaitMs(remain);
+          }
         }, 120);
       }
     };
     socket.on('messageRateLimited', handleRateLimited);
 
     const handleProfileUpdate = (data: { userId: string; avatarUrl?: string; username?: string }) => {
-      setMessages((prev) => prev.map((msg) => msg.authorId === data.userId ? { ...msg, author: { ...msg.author, ...(data.avatarUrl !== undefined && { avatarUrl: data.avatarUrl }), ...(data.username && { username: data.username }) } } : msg));
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.authorId === data.userId
+            ? {
+                ...msg,
+                author: {
+                  ...msg.author,
+                  ...(data.avatarUrl !== undefined && { avatarUrl: data.avatarUrl }),
+                  ...(data.username && { username: data.username }),
+                },
+              }
+            : msg
+        )
+      );
     };
-    socket.on('friendProfileUpdate', handleProfileUpdate); socket.on('userProfileUpdate', handleProfileUpdate);
+
+    socket.on('friendProfileUpdate', handleProfileUpdate);
+    socket.on('userProfileUpdate', handleProfileUpdate);
     
     const handleFriendRemoved = (data: { friendId: string }) => {
-      if (isDM && friendId === data.friendId) { setMessages([]); lastLoadedTargetRef.current = ''; window.location.href = '/app'; }
+      if (isDM && friendId === data.friendId) {
+        setMessages([]);
+        lastLoadedTargetRef.current = '';
+        window.location.href = '/app';
+      }
     };
     socket.on('friendRemoved', handleFriendRemoved);
 
     return () => {
-      socket.off('channelMessage', handleNewMessage); socket.off('directMessage', handleDirectMessage);
-      socket.off('friendProfileUpdate', handleProfileUpdate); socket.off('userProfileUpdate', handleProfileUpdate);
-      socket.off('friendRemoved', handleFriendRemoved); socket.off('messageRateLimited', handleRateLimited);
+      socket.off('channelMessage', handleNewMessage);
+      socket.off('directMessage', handleDirectMessage);
+      socket.off('friendProfileUpdate', handleProfileUpdate);
+      socket.off('userProfileUpdate', handleProfileUpdate);
+      socket.off('friendRemoved', handleFriendRemoved);
+      socket.off('messageRateLimited', handleRateLimited);
     };
-  }, [isDM, friendId, channelId, user?.id]);
+  }, [isDM, friendId, channelId, user?.id, markAsRead]); // 🟢 修复：添加 markAsRead 依赖
 
   useEffect(() => {
     const socket = socketService.getSocket();
@@ -354,15 +482,26 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
       setTypingUsers((prev) => (prev.includes(data.username!) ? prev : [...prev, data.username!]));
       const key = data.username!;
       if (typingTimeoutsRef.current[key]) clearTimeout(typingTimeoutsRef.current[key]);
-      typingTimeoutsRef.current[key] = setTimeout(() => { setTypingUsers((prev) => prev.filter((u) => u !== key)); delete typingTimeoutsRef.current[key]; }, 3000);
+      typingTimeoutsRef.current[key] = setTimeout(() => {
+        setTypingUsers((prev) => prev.filter((u) => u !== key));
+        delete typingTimeoutsRef.current[key];
+      }, 3000);
     };
-    socket.off('userTyping'); socket.on('userTyping', handleTyping);
-    return () => { socket.off('userTyping', handleTyping); };
+    socket.off('userTyping');
+    socket.on('userTyping', handleTyping);
+    return () => {
+      socket.off('userTyping', handleTyping);
+    };
   }, [isDM, channelId, dmConversationId]);
 
   useEffect(() => {
-    if (messages.length > 0 && isNearBottom) { const timer = setTimeout(() => { markAsRead(); }, 1000); return () => clearTimeout(timer); }
-  }, [messages, isNearBottom]);
+    if (messages.length > 0 && isNearBottom) {
+      const timer = setTimeout(() => {
+        markAsRead();
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [messages, isNearBottom, markAsRead]); // 🟢 修复：添加 markAsRead 依赖
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
@@ -370,30 +509,51 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
     if (!newMessage.trim() && pendingFiles.length === 0) return;
 
     const send = async () => {
-      let attachments: Array<{ url: string; type: 'IMAGE' | 'VIDEO' | 'FILE'; filename?: string; mimeType?: string; size?: number }> | undefined;
+      let attachments: Array<{
+        url: string;
+        type: 'IMAGE' | 'VIDEO' | 'FILE';
+        filename?: string;
+        mimeType?: string;
+        size?: number;
+      }> | undefined;
       if (pendingFiles.length > 0) {
         attachments = [];
         for (const f of pendingFiles) {
           const maxSize = 3 * 1024 * 1024 * 1024; // 3GB
-          if (f.size > maxSize) { toastStore.addToast({ message: `文件过大！${(f.size / 1024 / 1024).toFixed(2)} MB`, type: 'error' }); continue; }
+          if (f.size > maxSize) {
+            toastStore.addToast({ message: `文件过大！${formatFileSize(f.size)}`, type: 'error' });
+            continue;
+          }
           setUploadFileName(f.name);
           await uploadFileInChunks({
-            file: f, chunkSize: 5 * 1024 * 1024,
+            file: f,
+            chunkSize: 5 * 1024 * 1024,
             onProgress: (percent) => setUploadProgress(percent),
             onError: (err) => toastStore.addToast({ message: '上传失败: ' + err.message, type: 'error' }),
             onComplete: (url) => {
               let type: 'IMAGE' | 'VIDEO' | 'FILE' = 'FILE';
-              if (f.type.startsWith('image/')) type = 'IMAGE'; else if (f.type.startsWith('video/')) type = 'VIDEO';
+              if (f.type.startsWith('image/')) type = 'IMAGE';
+              else if (f.type.startsWith('video/')) type = 'VIDEO';
+              
               (attachments ?? []).push({ url, type, filename: f.name, mimeType: f.type, size: f.size });
-              setUploadProgress(null); setUploadFileName(null); toastStore.addToast({ message: '文件上传成功', type: 'success' });
+              setUploadProgress(null);
+              setUploadFileName(null);
+              toastStore.addToast({ message: '文件上传成功', type: 'success' });
             },
           });
         }
       }
-      if (isDM && friendId) socketService.sendDirectMessage(friendId, newMessage, attachments);
-      else if (channelId) socketService.sendChannelMessage(channelId, newMessage, attachments);
+
+      if (isDM && friendId) {
+        socketService.sendDirectMessage(friendId, newMessage, attachments);
+      } else if (channelId) {
+        socketService.sendChannelMessage(channelId, newMessage, attachments);
+      }
     };
-    send(); setNewMessage(''); setPendingFiles([]); setTimeout(() => markAsRead(), 500);
+    send();
+    setNewMessage('');
+    setPendingFiles([]);
+    setTimeout(() => markAsRead(), 500);
   };
 
   if (!isDM && channelId && isLoadingServers && !currentChannel) {
@@ -405,7 +565,6 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
   }
 
   if ((!isDM && !channelId) || (isDM && !friendId)) {
-    // 手机端首页：没有选频道时，这里通常不显示或显示空白，由 MainLayout 控制列表
     return (
       <div className="flex-1 flex items-center justify-center bg-discord-gray hidden md:flex">
         <div className="text-center">
@@ -418,7 +577,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
 
   return (
     <div className="flex-1 flex flex-col bg-discord-gray min-h-0 min-w-0 relative w-full z-10">
-      {/* 媒体预览 */}
+      {/* 图片/视频预览 Modal */}
       {previewMedia && (
         <div className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-4" onClick={() => setPreviewMedia(null)}>
           <div className="relative max-w-full max-h-full" onClick={(e) => e.stopPropagation()}>
@@ -434,7 +593,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
 
       {/* 标题栏 (Mobile 适配) */}
       <div className="h-14 md:h-12 bg-discord-darker border-b border-discord-darkest flex items-center px-4 shadow-md shrink-0">
-        {/* 🟢 手机端返回按钮：只在屏幕小的时候显示 */}
+        {/* 手机端返回按钮 */}
         <button 
           onClick={() => navigate('/app')} 
           className="md:hidden mr-3 text-gray-300 hover:text-white"
@@ -460,7 +619,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
         </div>
       </div>
 
-      {/* 消息区 */}
+      {/* 消息列表 */}
       <div ref={messagesContainerRef} className="flex-1 overflow-y-auto scrollbar-thin p-4 space-y-4 min-h-0">
         {isLoading ? (
           <div className="flex items-center justify-center h-full"><div className="text-discord-light-gray">加载中...</div></div>
@@ -472,6 +631,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
               {isLoadingMore && <div className="flex justify-center py-2"><div className="text-discord-light-gray text-sm">加载更多消息...</div></div>}
               {!hasMore && messages.length > 0 && <div className="flex justify-center py-2"><div className="text-gray-500 text-sm">没有更多消息了</div></div>}
             </div>
+
             {messages.map((message, index) => {
               const showUnreadDivider = (firstUnreadIndex !== null && index === firstUnreadIndex) || (lastReadMessageId && index > 0 && messages[index - 1].id === lastReadMessageId && message.authorId !== user?.id);
               const renderKey = (message as MessageWithKey)._key || message.id;
@@ -513,7 +673,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
                                   <div className="text-3xl shrink-0">📄</div>
                                   <div className="overflow-hidden min-w-0">
                                     <div className="text-blue-400 truncate font-medium">{att.filename}</div>
-                                    <div className="text-xs text-gray-500">{(att.size ? (att.size / 1024).toFixed(1) + ' KB' : 'File')}</div>
+                                    <div className="text-xs text-gray-500">{formatFileSize(att.size)}</div>
                                   </div>
                                 </a>
                               );
