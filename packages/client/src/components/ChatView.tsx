@@ -43,7 +43,6 @@ interface MessageWithKey extends Message {
   _key?: string;
 }
 
-// 文件大小格式化工具
 const formatFileSize = (bytes: number | undefined) => {
   if (!bytes || bytes === 0) return '0 B';
   const k = 1024;
@@ -62,10 +61,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
   const [rateLimitWaitMs, setRateLimitWaitMs] = useState(0);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const currentFriend = isDM && friendId ? friends.find(f => f.id === friendId) : null;
-
-  // 媒体预览状态
   const [previewMedia, setPreviewMedia] = useState<{ url: string; type: 'IMAGE' | 'VIDEO' } | null>(null);
-  
   const lastTypingEmitTimeRef = useRef<number>(0);
 
   let currentChannel = null;
@@ -92,15 +88,22 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
   const progressValue = typeof uploadProgress === 'number' ? uploadProgress : 0;
   const inputClass = `flex-1 px-2 py-3 bg-transparent text-white placeholder-gray-500 focus:outline-none${rateLimitWaitMs > 0 ? ' opacity-60 cursor-not-allowed' : ''}`;
 
+  // 🟢 修复：统一的 URL 处理逻辑，防止出现 //uploads 情况
   const getMediaUrl = useCallback((url: string | null | undefined): string => {
     if (!url) return '';
-    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:') || url.startsWith('blob:')) {
       return url;
     }
-    const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/api\/?$/, '');
+
+    let envApiUrl = import.meta.env.VITE_API_URL ?? '';
+    // 清理 API URL
+    if (envApiUrl.endsWith('/api')) envApiUrl = envApiUrl.replace(/\/api$/, '');
+    if (envApiUrl.endsWith('/')) envApiUrl = envApiUrl.slice(0, -1);
+
+    // 确保路径以 / 开头
     const normalized = url.startsWith('/') ? url : `/${url}`;
-    if (!API_URL) return normalized;
-    return `${API_URL}${normalized}`;
+    
+    return `${envApiUrl}${normalized}`;
   }, []);
 
   const getFileType = useCallback((att: { type: string; filename?: string; mimeType?: string }) => {
@@ -503,15 +506,11 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
     }
   }, [messages, isNearBottom, markAsRead]);
 
-  // --------------------------------------------------------------
-  // 🟢 修复：发送消息逻辑 (原子操作 + 3GB 限制 + 错误处理)
-  // --------------------------------------------------------------
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (rateLimitWaitMs > 0) return;
     if (!newMessage.trim() && pendingFiles.length === 0) return;
 
-    // 1. 准备附件数组
     const attachments: Array<{
       url: string;
       type: 'IMAGE' | 'VIDEO' | 'FILE';
@@ -520,15 +519,12 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
       size?: number;
     }> = [];
 
-    // 2. 如果有文件，先执行上传
     if (pendingFiles.length > 0) {
-      // 3GB 限制 (3221225472 bytes)
       const MAX_SIZE = 3221225472; 
 
       for (const f of pendingFiles) {
         if (f.size > MAX_SIZE) {
           toastStore.addToast({ message: `文件 "${f.name}" 超过 3GB 限制`, type: 'error' });
-          // 遇到大文件直接终止整个发送流程
           return; 
         }
 
@@ -536,7 +532,6 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
           setUploadFileName(f.name);
           setUploadProgress(0);
           
-          // 等待上传完成 (Promise based)
           const url = await uploadFileInChunks({
             file: f,
             chunkSize: 5 * 1024 * 1024,
@@ -558,25 +553,20 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
           toastStore.addToast({ message: `文件 "${f.name}" 上传成功`, type: 'success' });
 
         } catch (err: unknown) {
-          // 🟢 修复：打印错误日志解决 no-unused-vars，并使用 unknown 类型安全检查
           console.error('Upload error:', err);
           const errorMessage = err instanceof Error ? err.message : String(err);
           
           toastStore.addToast({ message: `文件 "${f.name}" 上传失败: ${errorMessage}`, type: 'error' });
           setUploadProgress(null);
           setUploadFileName(null);
-          
-          // 关键：只要有一个文件失败，就终止发送
           return; 
         }
       }
       
-      // 所有文件上传成功后，清理进度条状态
       setUploadProgress(null);
       setUploadFileName(null);
     }
 
-    // 3. 只有当（没有文件）或者（所有文件都上传成功）时，才发送消息
     try {
       if (isDM && friendId) {
         socketService.sendDirectMessage(friendId, newMessage, attachments.length > 0 ? attachments : undefined);
@@ -584,7 +574,6 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
         socketService.sendChannelMessage(channelId, newMessage, attachments.length > 0 ? attachments : undefined);
       }
       
-      // 4. 发送成功后才清空输入框和文件列表
       setNewMessage('');
       setPendingFiles([]);
       setTimeout(() => markAsRead(), 500);
@@ -616,7 +605,6 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
 
   return (
     <div className="flex-1 flex flex-col bg-discord-gray min-h-0 min-w-0 relative w-full z-10">
-      {/* 图片/视频预览 Modal */}
       {previewMedia && (
         <div className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-4" onClick={() => setPreviewMedia(null)}>
           <div className="relative max-w-full max-h-full" onClick={(e) => e.stopPropagation()}>
@@ -630,9 +618,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
         </div>
       )}
 
-      {/* 标题栏 (Mobile 适配) */}
       <div className="h-14 md:h-12 bg-discord-darker border-b border-discord-darkest flex items-center px-4 shadow-md shrink-0">
-        {/* 手机端返回按钮 */}
         <button 
           onClick={() => navigate('/app')} 
           className="md:hidden mr-3 text-gray-300 hover:text-white"
@@ -658,7 +644,6 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
         </div>
       </div>
 
-      {/* 消息列表 */}
       <div ref={messagesContainerRef} className="flex-1 overflow-y-auto scrollbar-thin p-4 space-y-4 min-h-0">
         {isLoading ? (
           <div className="flex items-center justify-center h-full"><div className="text-discord-light-gray">加载中...</div></div>
@@ -695,6 +680,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
                       {message.attachments && message.attachments.length > 0 && (
                         <div className="mt-2 space-y-2 flex flex-wrap gap-2">
                           {message.attachments.map((att, idx) => {
+                            // 使用修复后的 getMediaUrl
                             const mediaUrl = getMediaUrl(att.url);
                             const fileType = getFileType(att);
 
@@ -730,7 +716,6 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* 输入框 */}
       <div className="p-4 shrink-0">
         <form onSubmit={handleSendMessage} className="space-y-2">
           {pendingFiles.length > 0 && (
