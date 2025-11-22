@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom'; // 🟢 新增 useNavigate
 import { useServerStore } from '../stores/serverStore';
 import { useFriendStore } from '../stores/friendStore';
 import { useAuthStore } from '../stores/authStore';
@@ -45,6 +45,7 @@ interface MessageWithKey extends Message {
 
 export default function ChatView({ isDM = false }: ChatViewProps) {
   const { channelId, friendId } = useParams();
+  const navigate = useNavigate(); // 🟢 路由跳转
   const { servers, isLoading: isLoadingServers } = useServerStore();
   const { friends } = useFriendStore();
   const { user } = useAuthStore();
@@ -55,7 +56,6 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
 
   // 媒体预览状态
   const [previewMedia, setPreviewMedia] = useState<{ url: string; type: 'IMAGE' | 'VIDEO' } | null>(null);
-  
   const lastTypingEmitTimeRef = useRef<number>(0);
 
   let currentChannel = null;
@@ -93,23 +93,13 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
     return `${API_URL}${normalized}`;
   };
 
-  // --- 智能文件类型判断函数 ---
   const getFileType = (att: { type: string; filename?: string; mimeType?: string }) => {
-    // 1. 如果后端明确是 IMAGE/VIDEO，直接信
     if (att.type === 'IMAGE') return 'IMAGE';
     if (att.type === 'VIDEO') return 'VIDEO';
-
-    // 2. 否则，根据后缀名或 mimeType 再次判断
     const name = (att.filename || '').toLowerCase();
     const mime = (att.mimeType || '').toLowerCase();
-
-    if (mime.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|bmp|svg)$/.test(name)) {
-      return 'IMAGE';
-    }
-    if (mime.startsWith('video/') || /\.(mp4|webm|ogg|mov|mkv)$/.test(name)) {
-      return 'VIDEO';
-    }
-
+    if (mime.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|bmp|svg)$/.test(name)) return 'IMAGE';
+    if (mime.startsWith('video/') || /\.(mp4|webm|ogg|mov|mkv)$/.test(name)) return 'VIDEO';
     return 'FILE';
   };
 
@@ -117,16 +107,12 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
     if (!isDM) {
       const sock = socketService.getSocket();
       const prev = prevChannelRef.current;
-      if (prev && prev !== channelId) {
-        sock?.emit('leaveChannel', { channelId: prev });
-      }
+      if (prev && prev !== channelId) sock?.emit('leaveChannel', { channelId: prev });
       if (channelId) {
         sock?.emit('joinChannel', { channelId });
         prevChannelRef.current = channelId;
       }
-      return () => {
-        if (channelId) sock?.emit('leaveChannel', { channelId });
-      };
+      return () => { if (channelId) sock?.emit('leaveChannel', { channelId }); };
     }
   }, [isDM, channelId]);
 
@@ -156,9 +142,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
   const [uploadFileName, setUploadFileName] = useState<string | null>(null);
   const toastStore = useToastStore();
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  const scrollToBottom = () => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); };
 
   useEffect(() => {
     const targetId = isDM ? friendId : channelId;
@@ -189,10 +173,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
       const mySeq = ++loadSeqRef.current;
       const targetId = isDM ? friendId : channelId;
       if (!targetId) {
-        setMessages([]);
-        setDmConversationId(null);
-        lastLoadedTargetRef.current = '';
-        return;
+        setMessages([]); setDmConversationId(null); lastLoadedTargetRef.current = ''; return;
       }
       if (lastLoadedTargetRef.current === targetId && messages.length > 0) return;
       lastLoadedTargetRef.current = targetId;
@@ -205,49 +186,32 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
           const conversationId = stateResponse.data.data?.conversationId;
           setDmConversationId(conversationId || null);
           if (!conversationId) {
-            setMessages([]);
-            setHasMore(false);
+            setMessages([]); setHasMore(false);
           } else {
             const res = await messageAPI.getConversationMessages(conversationId, 50);
             const loaded = (res.data.data || []) as Message[];
             const uniqueMap = new Map<string, Message>();
-            loaded.forEach((m: Message, idx) => {
-              const key = m.id || `temp-${idx}-${Date.now()}-${Math.random()}`;
-              (m as MessageWithKey)._key = key;
-              uniqueMap.set(key, m);
-            });
+            loaded.forEach((m, idx) => { const key = m.id || `temp-${idx}-${Date.now()}`; (m as MessageWithKey)._key = key; uniqueMap.set(key, m); });
             const list = Array.from(uniqueMap.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
             if (mySeq === loadSeqRef.current) setMessages(list);
             setHasMore(loaded.length === 50);
-            if (savedLastRead) {
-              const idx = list.findIndex(m => m.id === savedLastRead || (m as MessageWithKey)._key === savedLastRead);
-              setFirstUnreadIndex(idx >= 0 ? idx + 1 : null);
-            }
+            if (savedLastRead) { const idx = list.findIndex(m => m.id === savedLastRead || (m as MessageWithKey)._key === savedLastRead); setFirstUnreadIndex(idx >= 0 ? idx + 1 : null); }
           }
         } else if (channelId) {
           const res = await messageAPI.getChannelMessages(channelId, 50);
           const loaded = (res.data.data || []) as Message[];
           const uniqueMap = new Map<string, Message>();
-          loaded.forEach((m: Message, idx) => {
-            const key = m.id || `temp-${idx}-${Date.now()}-${Math.random()}`;
-            (m as MessageWithKey)._key = key;
-            uniqueMap.set(key, m);
-          });
+          loaded.forEach((m, idx) => { const key = m.id || `temp-${idx}-${Date.now()}`; (m as MessageWithKey)._key = key; uniqueMap.set(key, m); });
           const list = Array.from(uniqueMap.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
           if (mySeq === loadSeqRef.current) setMessages(list);
           setHasMore(loaded.length === 50);
           const stateRes = await messageAPI.getChannelState(channelId);
           const serverLastRead = stateRes.data.data?.lastReadMessageId as string | undefined;
           const effectiveLastRead = savedLastRead || serverLastRead;
-          if (effectiveLastRead) {
-            const idx = list.findIndex(m => m.id === effectiveLastRead || (m as MessageWithKey)._key === effectiveLastRead);
-            setFirstUnreadIndex(idx >= 0 ? idx + 1 : null);
-          }
+          if (effectiveLastRead) { const idx = list.findIndex(m => m.id === effectiveLastRead || (m as MessageWithKey)._key === effectiveLastRead); setFirstUnreadIndex(idx >= 0 ? idx + 1 : null); }
         }
         setTimeout(() => scrollToBottom(), 100);
-      } finally {
-        setIsLoading(false);
-      }
+      } finally { setIsLoading(false); }
     };
     loadMessages();
   }, [isDM, friendId, channelId, user?.id, messages.length]);
@@ -265,79 +229,42 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
           conversationId = stateRes.data.data.conversationId;
           setDmConversationId(conversationId || null);
         }
-        if (!conversationId) {
-          setIsLoadingMore(false);
-          return;
-        }
+        if (!conversationId) { setIsLoadingMore(false); return; }
         response = await messageAPI.getConversationMessages(conversationId, 50, oldestMessage.id);
       } else if (channelId) {
         response = await messageAPI.getChannelMessages(channelId, 50, oldestMessage.id);
-      } else {
-        setIsLoadingMore(false);
-        return;
-      }
+      } else { setIsLoadingMore(false); return; }
       const olderMessages = response.data.data;
       if (olderMessages.length > 0) {
         const container = messagesContainerRef.current;
         const scrollHeightBefore = container?.scrollHeight || 0;
         setMessages((prev) => {
-          const merged: Message[] = [...olderMessages, ...prev];
+          const merged = [...olderMessages, ...prev];
           const uniqueMap = new Map<string, Message>();
-          merged.forEach((m: Message, idx) => {
-            const key = m.id || (m as MessageWithKey)._key || `temp-${idx}-${Date.now()}-${Math.random()}`;
-            (m as MessageWithKey)._key = key;
-            uniqueMap.set(key, m);
-          });
+          merged.forEach((m, idx) => { const key = m.id || (m as MessageWithKey)._key || `temp-${idx}-${Date.now()}`; (m as MessageWithKey)._key = key; uniqueMap.set(key, m); });
           return Array.from(uniqueMap.values()).sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
         });
         setHasMore(olderMessages.length === 50);
-        setTimeout(() => {
-          if (container) {
-            const scrollHeightAfter = container.scrollHeight;
-            container.scrollTop = scrollHeightAfter - scrollHeightBefore;
-          }
-        }, 0);
-      } else {
-        setHasMore(false);
-      }
-    } catch (error) {
-      console.error('Failed to load more messages:', error);
-    } finally {
-      setIsLoadingMore(false);
-    }
+        setTimeout(() => { if (container) container.scrollTop = container.scrollHeight - scrollHeightBefore; }, 0);
+      } else { setHasMore(false); }
+    } catch (error) { console.error('Failed to load more:', error); } finally { setIsLoadingMore(false); }
   }, [isLoadingMore, hasMore, messages, isDM, friendId, channelId, dmConversationId]);
 
   useEffect(() => {
     if (isDM) {
       const sock = socketService.getSocket();
       const prev = prevConversationRef.current;
-      if (prev && prev !== dmConversationId) {
-        sock?.emit('leaveConversation', { conversationId: prev });
-      }
-      if (dmConversationId) {
-        sock?.emit('joinConversation', { conversationId: dmConversationId });
-        prevConversationRef.current = dmConversationId;
-      }
-      return () => {
-        if (dmConversationId) sock?.emit('leaveConversation', { conversationId: dmConversationId });
-      };
+      if (prev && prev !== dmConversationId) sock?.emit('leaveConversation', { conversationId: prev });
+      if (dmConversationId) { sock?.emit('joinConversation', { conversationId: dmConversationId }); prevConversationRef.current = dmConversationId; }
+      return () => { if (dmConversationId) sock?.emit('leaveConversation', { conversationId: dmConversationId }); };
     }
   }, [isDM, dmConversationId]);
 
   useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && hasMore && !isLoadingMore) {
-          loadMoreMessages();
-        }
-      },
-      { threshold: 1.0 }
-    );
+    const observer = new IntersectionObserver((entries) => { if (entries[0].isIntersecting && hasMore && !isLoadingMore) loadMoreMessages(); }, { threshold: 1.0 });
     const trigger = loadMoreTriggerRef.current;
     if (trigger) observer.observe(trigger);
-    return () => {
-      if (trigger) observer.unobserve(trigger);
-    };
+    return () => { if (trigger) observer.unobserve(trigger); };
   }, [hasMore, isLoadingMore, loadMoreMessages]);
 
   useEffect(() => {
@@ -345,12 +272,8 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
     if (!container) return;
     const handleScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = container;
-      const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-      const nearBottom = distanceFromBottom < 100;
-      setIsNearBottom(nearBottom);
-      if (nearBottom && messages.length > 0) {
-        markAsRead();
-      }
+      setIsNearBottom(scrollHeight - scrollTop - clientHeight < 100);
+      if (scrollHeight - scrollTop - clientHeight < 100 && messages.length > 0) markAsRead();
     };
     container.addEventListener('scroll', handleScroll);
     return () => container.removeEventListener('scroll', handleScroll);
@@ -359,7 +282,6 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
   useEffect(() => {
     const targetId = isDM ? friendId : channelId;
     if (!targetId) return;
-    const currentUserId = user?.id;
     const socket = socketService.getSocket();
     if (!socket) return;
 
@@ -370,49 +292,28 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
           if (exists) return prev;
           const merged = [...prev, message];
           const uniq = new Map<string, Message>();
-          merged.forEach((m: Message, idx) => {
-            const key = (m as MessageWithKey)._key || m.id || `temp-${idx}-${Date.now()}-${Math.random()}`;
-            (m as MessageWithKey)._key = key;
-            uniq.set(key, m);
-          });
+          merged.forEach((m, idx) => { const key = (m as MessageWithKey)._key || m.id || `temp-${idx}-${Date.now()}`; (m as MessageWithKey)._key = key; uniq.set(key, m); });
           return Array.from(uniq.values());
         });
-        setTimeout(() => scrollToBottom(), 100);
-        setTimeout(() => markAsRead(), 500);
+        setTimeout(() => scrollToBottom(), 100); setTimeout(() => markAsRead(), 500);
       }
     };
-
     const handleDirectMessage = (message: Message & { directMessageConversationId?: string }) => {
-      if (isDM && friendId) {
-        const isMyMessage = message.authorId === currentUserId;
-        const isFriendMessage = message.authorId === friendId;
-        if (isMyMessage || isFriendMessage) {
-          setMessages((prev) => {
-            const exists = prev.some(m => (m as MessageWithKey)._key ? (m as MessageWithKey)._key === ((message as MessageWithKey)._key || message.id) : m.id === message.id);
-            if (exists) return prev;
-            const merged = [...prev, message];
-            const uniq = new Map<string, Message>();
-            merged.forEach((m: Message, idx) => {
-              const key = (m as MessageWithKey)._key || m.id || `temp-${idx}-${Date.now()}-${Math.random()}`;
-              (m as MessageWithKey)._key = key;
-              uniq.set(key, m);
-            });
-            return Array.from(uniq.values());
-          });
-          setTimeout(() => scrollToBottom(), 100);
-          setTimeout(() => markAsRead(), 500);
-        }
+      if (isDM && friendId && (message.authorId === user?.id || message.authorId === friendId)) {
+        setMessages((prev) => {
+          const exists = prev.some(m => (m as MessageWithKey)._key ? (m as MessageWithKey)._key === ((message as MessageWithKey)._key || message.id) : m.id === message.id);
+          if (exists) return prev;
+          const merged = [...prev, message];
+          const uniq = new Map<string, Message>();
+          merged.forEach((m, idx) => { const key = (m as MessageWithKey)._key || m.id || `temp-${idx}-${Date.now()}`; (m as MessageWithKey)._key = key; uniq.set(key, m); });
+          return Array.from(uniq.values());
+        });
+        setTimeout(() => scrollToBottom(), 100); setTimeout(() => markAsRead(), 500);
       }
     };
 
-    socket.off('channelMessage');
-    socket.off('directMessage');
-    socket.off('friendProfileUpdate');
-    socket.off('userProfileUpdate');
-    socket.off('messageRateLimited');
-    
-    socket.on('channelMessage', handleNewMessage);
-    socket.on('directMessage', handleDirectMessage);
+    socket.off('channelMessage'); socket.off('directMessage'); socket.off('friendProfileUpdate'); socket.off('userProfileUpdate'); socket.off('messageRateLimited');
+    socket.on('channelMessage', handleNewMessage); socket.on('directMessage', handleDirectMessage);
 
     const handleRateLimited = (data: { waitMs: number }) => {
       if (data.waitMs > 0) {
@@ -420,56 +321,27 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
         if (rateLimitTimerRef.current) window.clearInterval(rateLimitTimerRef.current);
         const start = Date.now();
         rateLimitTimerRef.current = window.setInterval(() => {
-          const elapsed = Date.now() - start;
-          const remain = data.waitMs - elapsed;
-          if (remain <= 0) {
-            setRateLimitWaitMs(0);
-            if (rateLimitTimerRef.current) window.clearInterval(rateLimitTimerRef.current);
-            rateLimitTimerRef.current = null;
-          } else {
-            setRateLimitWaitMs(remain);
-          }
+          const elapsed = Date.now() - start; const remain = data.waitMs - elapsed;
+          if (remain <= 0) { setRateLimitWaitMs(0); if (rateLimitTimerRef.current) window.clearInterval(rateLimitTimerRef.current); rateLimitTimerRef.current = null; } else { setRateLimitWaitMs(remain); }
         }, 120);
       }
     };
     socket.on('messageRateLimited', handleRateLimited);
 
     const handleProfileUpdate = (data: { userId: string; avatarUrl?: string; username?: string }) => {
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.authorId === data.userId
-            ? {
-                ...msg,
-                author: {
-                  ...msg.author,
-                  ...(data.avatarUrl !== undefined && { avatarUrl: data.avatarUrl }),
-                  ...(data.username && { username: data.username }),
-                },
-              }
-            : msg
-        )
-      );
+      setMessages((prev) => prev.map((msg) => msg.authorId === data.userId ? { ...msg, author: { ...msg.author, ...(data.avatarUrl !== undefined && { avatarUrl: data.avatarUrl }), ...(data.username && { username: data.username }) } } : msg));
     };
-
-    socket.on('friendProfileUpdate', handleProfileUpdate);
-    socket.on('userProfileUpdate', handleProfileUpdate);
+    socket.on('friendProfileUpdate', handleProfileUpdate); socket.on('userProfileUpdate', handleProfileUpdate);
     
     const handleFriendRemoved = (data: { friendId: string }) => {
-      if (isDM && friendId === data.friendId) {
-        setMessages([]);
-        lastLoadedTargetRef.current = '';
-        window.location.href = '/app';
-      }
+      if (isDM && friendId === data.friendId) { setMessages([]); lastLoadedTargetRef.current = ''; window.location.href = '/app'; }
     };
     socket.on('friendRemoved', handleFriendRemoved);
 
     return () => {
-      socket.off('channelMessage', handleNewMessage);
-      socket.off('directMessage', handleDirectMessage);
-      socket.off('friendProfileUpdate', handleProfileUpdate);
-      socket.off('userProfileUpdate', handleProfileUpdate);
-      socket.off('friendRemoved', handleFriendRemoved);
-      socket.off('messageRateLimited', handleRateLimited);
+      socket.off('channelMessage', handleNewMessage); socket.off('directMessage', handleDirectMessage);
+      socket.off('friendProfileUpdate', handleProfileUpdate); socket.off('userProfileUpdate', handleProfileUpdate);
+      socket.off('friendRemoved', handleFriendRemoved); socket.off('messageRateLimited', handleRateLimited);
     };
   }, [isDM, friendId, channelId, user?.id]);
 
@@ -482,25 +354,14 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
       setTypingUsers((prev) => (prev.includes(data.username!) ? prev : [...prev, data.username!]));
       const key = data.username!;
       if (typingTimeoutsRef.current[key]) clearTimeout(typingTimeoutsRef.current[key]);
-      typingTimeoutsRef.current[key] = setTimeout(() => {
-        setTypingUsers((prev) => prev.filter((u) => u !== key));
-        delete typingTimeoutsRef.current[key];
-      }, 3000);
+      typingTimeoutsRef.current[key] = setTimeout(() => { setTypingUsers((prev) => prev.filter((u) => u !== key)); delete typingTimeoutsRef.current[key]; }, 3000);
     };
-    socket.off('userTyping');
-    socket.on('userTyping', handleTyping);
-    return () => {
-      socket.off('userTyping', handleTyping);
-    };
+    socket.off('userTyping'); socket.on('userTyping', handleTyping);
+    return () => { socket.off('userTyping', handleTyping); };
   }, [isDM, channelId, dmConversationId]);
 
   useEffect(() => {
-    if (messages.length > 0 && isNearBottom) {
-      const timer = setTimeout(() => {
-        markAsRead();
-      }, 1000);
-      return () => clearTimeout(timer);
-    }
+    if (messages.length > 0 && isNearBottom) { const timer = setTimeout(() => { markAsRead(); }, 1000); return () => clearTimeout(timer); }
   }, [messages, isNearBottom]);
 
   const handleSendMessage = (e: React.FormEvent) => {
@@ -509,52 +370,30 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
     if (!newMessage.trim() && pendingFiles.length === 0) return;
 
     const send = async () => {
-      let attachments: Array<{
-        url: string;
-        type: 'IMAGE' | 'VIDEO' | 'FILE';
-        filename?: string;
-        mimeType?: string;
-        size?: number;
-      }> | undefined;
+      let attachments: Array<{ url: string; type: 'IMAGE' | 'VIDEO' | 'FILE'; filename?: string; mimeType?: string; size?: number }> | undefined;
       if (pendingFiles.length > 0) {
         attachments = [];
         for (const f of pendingFiles) {
-          const maxSize = 3 * 1024 * 1024 * 1024;
-          if (f.size > maxSize) {
-            toastStore.addToast({ message: `文件过大！${(f.size / 1024 / 1024).toFixed(2)} MB`, type: 'error' });
-            continue;
-          }
+          const maxSize = 3 * 1024 * 1024 * 1024; // 3GB
+          if (f.size > maxSize) { toastStore.addToast({ message: `文件过大！${(f.size / 1024 / 1024).toFixed(2)} MB`, type: 'error' }); continue; }
           setUploadFileName(f.name);
           await uploadFileInChunks({
-            file: f,
-            chunkSize: 5 * 1024 * 1024,
+            file: f, chunkSize: 5 * 1024 * 1024,
             onProgress: (percent) => setUploadProgress(percent),
             onError: (err) => toastStore.addToast({ message: '上传失败: ' + err.message, type: 'error' }),
             onComplete: (url) => {
-              // 🟢 智能判断类型，避免默认为 FILE
               let type: 'IMAGE' | 'VIDEO' | 'FILE' = 'FILE';
-              if (f.type.startsWith('image/')) type = 'IMAGE';
-              else if (f.type.startsWith('video/')) type = 'VIDEO';
-              
+              if (f.type.startsWith('image/')) type = 'IMAGE'; else if (f.type.startsWith('video/')) type = 'VIDEO';
               (attachments ?? []).push({ url, type, filename: f.name, mimeType: f.type, size: f.size });
-              setUploadProgress(null);
-              setUploadFileName(null);
-              toastStore.addToast({ message: '文件上传成功', type: 'success' });
+              setUploadProgress(null); setUploadFileName(null); toastStore.addToast({ message: '文件上传成功', type: 'success' });
             },
           });
         }
       }
-
-      if (isDM && friendId) {
-        socketService.sendDirectMessage(friendId, newMessage, attachments);
-      } else if (channelId) {
-        socketService.sendChannelMessage(channelId, newMessage, attachments);
-      }
+      if (isDM && friendId) socketService.sendDirectMessage(friendId, newMessage, attachments);
+      else if (channelId) socketService.sendChannelMessage(channelId, newMessage, attachments);
     };
-    send();
-    setNewMessage('');
-    setPendingFiles([]);
-    setTimeout(() => markAsRead(), 500);
+    send(); setNewMessage(''); setPendingFiles([]); setTimeout(() => markAsRead(), 500);
   };
 
   if (!isDM && channelId && isLoadingServers && !currentChannel) {
@@ -566,8 +405,9 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
   }
 
   if ((!isDM && !channelId) || (isDM && !friendId)) {
+    // 手机端首页：没有选频道时，这里通常不显示或显示空白，由 MainLayout 控制列表
     return (
-      <div className="flex-1 flex items-center justify-center bg-discord-gray">
+      <div className="flex-1 flex items-center justify-center bg-discord-gray hidden md:flex">
         <div className="text-center">
           <h2 className="text-2xl font-bold text-white mb-2">欢迎来到 Chat & Community</h2>
           <p className="text-discord-light-gray">选择一个频道或好友开始聊天</p>
@@ -577,12 +417,12 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-discord-gray min-h-0 min-w-0 relative">
-      {/* 图片/视频预览 Modal */}
+    <div className="flex-1 flex flex-col bg-discord-gray min-h-0 min-w-0 relative w-full z-10">
+      {/* 媒体预览 */}
       {previewMedia && (
-        <div className="absolute inset-0 z-50 bg-black/90 flex items-center justify-center p-4" onClick={() => setPreviewMedia(null)}>
+        <div className="fixed inset-0 z-[100] bg-black/90 flex items-center justify-center p-4" onClick={() => setPreviewMedia(null)}>
           <div className="relative max-w-full max-h-full" onClick={(e) => e.stopPropagation()}>
-            <button className="absolute top-[-40px] right-0 text-white text-xl hover:text-gray-300" onClick={() => setPreviewMedia(null)}>✕</button>
+            <button className="absolute top-4 right-4 text-white text-3xl z-10 drop-shadow-md hover:text-gray-300" onClick={() => setPreviewMedia(null)}>✕</button>
             {previewMedia.type === 'IMAGE' ? (
               <img src={previewMedia.url} alt="Preview" className="max-w-full max-h-[90vh] object-contain rounded" crossOrigin="anonymous" />
             ) : (
@@ -592,158 +432,131 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
         </div>
       )}
 
-      <div className="h-12 bg-discord-darker border-b border-discord-darkest flex items-center px-4 shadow-md">
-        <div className="flex items-center gap-2">
+      {/* 标题栏 (Mobile 适配) */}
+      <div className="h-14 md:h-12 bg-discord-darker border-b border-discord-darkest flex items-center px-4 shadow-md shrink-0">
+        {/* 🟢 手机端返回按钮：只在屏幕小的时候显示 */}
+        <button 
+          onClick={() => navigate('/app')} 
+          className="md:hidden mr-3 text-gray-300 hover:text-white"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+          </svg>
+        </button>
+
+        <div className="flex items-center gap-2 overflow-hidden">
           {isDM && currentFriend ? (
             <>
               <UserAvatar username={currentFriend.username} avatarUrl={currentFriend.avatarUrl} size="sm" />
-              <span className="text-white font-semibold">{currentFriend.username}</span>
+              <span className="text-white font-semibold truncate">{currentFriend.username}</span>
               {statusDot}
             </>
           ) : (
             <>
-              <span className="text-gray-400">#</span>
-              <span className="text-white font-semibold">{currentChannel?.name || '频道'}</span>
+              <span className="text-gray-400 shrink-0">#</span>
+              <span className="text-white font-semibold truncate">{currentChannel?.name || '频道'}</span>
             </>
           )}
         </div>
       </div>
 
+      {/* 消息区 */}
       <div ref={messagesContainerRef} className="flex-1 overflow-y-auto scrollbar-thin p-4 space-y-4 min-h-0">
         {isLoading ? (
           <div className="flex items-center justify-center h-full"><div className="text-discord-light-gray">加载中...</div></div>
         ) : messages.length === 0 ? (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center"><p className="text-discord-light-gray">还没有消息</p></div>
-          </div>
+          <div className="flex items-center justify-center h-full"><div className="text-center"><p className="text-discord-light-gray">还没有消息</p></div></div>
         ) : (
           <>
             <div ref={loadMoreTriggerRef} className="h-1">
               {isLoadingMore && <div className="flex justify-center py-2"><div className="text-discord-light-gray text-sm">加载更多消息...</div></div>}
               {!hasMore && messages.length > 0 && <div className="flex justify-center py-2"><div className="text-gray-500 text-sm">没有更多消息了</div></div>}
             </div>
-
             {messages.map((message, index) => {
-            const showUnreadDivider = (firstUnreadIndex !== null && index === firstUnreadIndex) || (lastReadMessageId && index > 0 && messages[index - 1].id === lastReadMessageId && message.authorId !== user?.id);
-            const renderKey = (message as MessageWithKey)._key || message.id;
-            return (
-              <div key={renderKey}>
-                {showUnreadDivider && (
-                  <div ref={firstUnreadRef} className="relative flex items-center py-4">
-                    <div className="flex-1 border-t-2 border-discord-red"></div>
-                    <span className="px-3 text-xs font-semibold text-discord-red uppercase">未读消息</span>
-                    <div className="flex-1 border-t-2 border-discord-red"></div>
-                  </div>
-                )}
-                <div className="flex items-start space-x-3 hover:bg-discord-darker/30 p-2 rounded">
-                  <UserAvatar username={message.author.username} avatarUrl={message.author.avatarUrl} size="md" />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-baseline space-x-2">
-                      <span className="font-semibold text-white">{message.author.username}</span>
-                      <span className="text-xs text-gray-500">{new Date(message.createdAt).toLocaleString('zh-CN')}</span>
+              const showUnreadDivider = (firstUnreadIndex !== null && index === firstUnreadIndex) || (lastReadMessageId && index > 0 && messages[index - 1].id === lastReadMessageId && message.authorId !== user?.id);
+              const renderKey = (message as MessageWithKey)._key || message.id;
+              return (
+                <div key={renderKey}>
+                  {showUnreadDivider && (
+                    <div ref={firstUnreadRef} className="relative flex items-center py-4">
+                      <div className="flex-1 border-t-2 border-discord-red"></div>
+                      <span className="px-3 text-xs font-semibold text-discord-red uppercase">未读消息</span>
+                      <div className="flex-1 border-t-2 border-discord-red"></div>
                     </div>
-                    {message.content && <p className="text-discord-light-gray break-words">{message.content}</p>}
-                    
-                    {/* 🚀 附件渲染 (使用智能判断) */}
-                    {message.attachments && message.attachments.length > 0 && (
-                      <div className="mt-2 space-y-2 flex flex-wrap gap-2">
-                        {message.attachments.map((att, idx) => {
-                          const mediaUrl = getMediaUrl(att.url);
-                          // 🟢 使用智能类型判断
-                          const fileType = getFileType(att);
-
-                          if (fileType === 'IMAGE') {
-                            return (
-                              <img
-                                key={idx}
-                                src={mediaUrl}
-                                alt={att.filename}
-                                crossOrigin="anonymous"
-                                className="max-w-full sm:max-w-sm max-h-[400px] rounded cursor-pointer object-contain hover:opacity-95 border border-discord-darkest bg-black/20"
-                                onClick={() => setPreviewMedia({ url: mediaUrl, type: 'IMAGE' })}
-                              />
-                            );
-                          } else if (fileType === 'VIDEO') {
-                            return (
-                              <video
-                                key={idx}
-                                src={mediaUrl}
-                                crossOrigin="anonymous"
-                                controls
-                                className="max-w-full sm:max-w-sm max-h-[400px] rounded border border-discord-darkest bg-black"
-                              />
-                            );
-                          } else {
-                            return (
-                              <a
-                                key={idx}
-                                href={mediaUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="flex items-center gap-2 bg-discord-darker p-3 rounded border border-discord-darkest hover:bg-discord-darkest transition"
-                              >
-                                <div className="text-3xl">📄</div>
-                                <div className="overflow-hidden">
-                                  <div className="text-blue-400 truncate max-w-[200px] font-medium">{att.filename}</div>
-                                  <div className="text-xs text-gray-500">{(att.size ? (att.size / 1024).toFixed(1) + ' KB' : 'Unknown size')}</div>
-                                </div>
-                              </a>
-                            );
-                          }
-                        })}
+                  )}
+                  <div className="flex items-start space-x-3 hover:bg-discord-darker/30 p-2 rounded group">
+                    <UserAvatar username={message.author.username} avatarUrl={message.author.avatarUrl} size="md" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-baseline space-x-2">
+                        <span className="font-semibold text-white">{message.author.username}</span>
+                        <span className="text-xs text-gray-500">{new Date(message.createdAt).toLocaleString('zh-CN')}</span>
                       </div>
-                    )}
+                      {message.content && <p className="text-discord-light-gray break-words whitespace-pre-wrap">{message.content}</p>}
+                      
+                      {message.attachments && message.attachments.length > 0 && (
+                        <div className="mt-2 space-y-2 flex flex-wrap gap-2">
+                          {message.attachments.map((att, idx) => {
+                            const mediaUrl = getMediaUrl(att.url);
+                            const fileType = getFileType(att);
+
+                            if (fileType === 'IMAGE') {
+                              return (
+                                <img key={idx} src={mediaUrl} alt={att.filename} crossOrigin="anonymous" className="max-w-full sm:max-w-sm max-h-[300px] rounded cursor-pointer object-contain bg-black/20 border border-discord-darkest" onClick={() => setPreviewMedia({ url: mediaUrl, type: 'IMAGE' })} />
+                              );
+                            } else if (fileType === 'VIDEO') {
+                              return (
+                                <video key={idx} src={mediaUrl} crossOrigin="anonymous" controls className="max-w-full sm:max-w-sm max-h-[300px] rounded border border-discord-darkest bg-black" />
+                              );
+                            } else {
+                              return (
+                                <a key={idx} href={mediaUrl} target="_blank" rel="noreferrer" className="flex items-center gap-2 bg-discord-darker p-3 rounded border border-discord-darkest hover:bg-discord-darkest transition max-w-full">
+                                  <div className="text-3xl shrink-0">📄</div>
+                                  <div className="overflow-hidden min-w-0">
+                                    <div className="text-blue-400 truncate font-medium">{att.filename}</div>
+                                    <div className="text-xs text-gray-500">{(att.size ? (att.size / 1024).toFixed(1) + ' KB' : 'File')}</div>
+                                  </div>
+                                </a>
+                              );
+                            }
+                          })}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
           </>
         )}
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="p-4">
+      {/* 输入框 */}
+      <div className="p-4 shrink-0">
         <form onSubmit={handleSendMessage} className="space-y-2">
           {pendingFiles.length > 0 && (
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 max-h-20 overflow-y-auto">
               {pendingFiles.map((f, i) => (
                 <span key={i} className="text-xs bg-discord-darkest px-2 py-1 rounded text-gray-300 flex items-center gap-1">
-                  {f.name}
-                  <button type="button" onClick={() => setPendingFiles(prev => prev.filter((_, idx) => idx !== i))} className="text-red-400 hover:text-red-300 ml-1">×</button>
+                  <span className="truncate max-w-[100px]">{f.name}</span>
+                  <button type="button" onClick={() => setPendingFiles(prev => prev.filter((_, idx) => idx !== i))} className="text-red-400 hover:text-red-300 ml-1 font-bold">×</button>
                 </span>
               ))}
             </div>
           )}
           <div className="bg-discord-darker rounded-lg flex items-center">
-            <label className="px-3 py-3 cursor-pointer text-gray-400 hover:text-white">
+            <label className="px-3 py-3 cursor-pointer text-gray-400 hover:text-white shrink-0">
               <input type="file" className="hidden" multiple onChange={(e) => setPendingFiles(prev => [...prev, ...Array.from(e.target.files || [])])} />
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M4 3a2 2 0 00-2 2v6a6 6 0 006 6h3a5 5 0 005-5V9a3 3 0 00-3-3H9a2 2 0 000 4h5v2a3 3 0 01-3 3H8a4 4 0 01-4-4V5a1 1 0 011-1h9a1 1 0 110 2H5v2H4V5a2 2 0 012-2h9a3 3 0 013 3v6a6 6 0 01-6 6H8a8 8 0 01-8-8V5a4 4 0 014-4h9a5 5 0 015 5v1h-2V6a3 3 0 00-3-3H4z"/></svg>
+              <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path d="M4 3a2 2 0 00-2 2v6a6 6 0 006 6h3a5 5 0 005-5V9a3 3 0 00-3-3H9a2 2 0 000 4h5v2a3 3 0 01-3 3H8a4 4 0 01-4-4V5a1 1 0 011-1h9a1 1 0 110 2H5v2H4V5a2 2 0 012-2h9a3 3 0 013 3v6a6 6 0 01-6 6H8a8 8 0 01-8-8V5a4 4 0 014-4h9a5 5 0 015 5v1h-2V6a3 3 0 00-3-3H4z"/></svg>
             </label>
-            <input
-              type="text"
-              value={newMessage}
-              onChange={(e) => {
-                const v = e.target.value;
-                setNewMessage(v);
-                const now = Date.now();
-                if (now - lastTypingEmitTimeRef.current > 1000) {
-                  if (isDM && dmConversationId) socketService.sendTyping({ conversationId: dmConversationId });
-                  else if (!isDM && channelId) socketService.sendTyping({ channelId });
-                  lastTypingEmitTimeRef.current = now;
-                }
-              }}
-              placeholder="发送消息..."
-              className={inputClass}
-              disabled={rateLimitWaitMs > 0}
-            />
-            {rateLimitWaitMs > 0 && <span className="px-3 text-xs text-red-400 select-none">冷却 {Math.ceil(rateLimitWaitMs/1000)}s...</span>}
+            <input type="text" value={newMessage} onChange={(e) => { const v = e.target.value; setNewMessage(v); const now = Date.now(); if (now - lastTypingEmitTimeRef.current > 1000) { if (isDM && dmConversationId) socketService.sendTyping({ conversationId: dmConversationId }); else if (!isDM && channelId) socketService.sendTyping({ channelId }); lastTypingEmitTimeRef.current = now; } }} placeholder="发送消息..." className={inputClass} disabled={rateLimitWaitMs > 0} />
+            {rateLimitWaitMs > 0 && <span className="px-3 text-xs text-red-400 select-none shrink-0">冷却 {Math.ceil(rateLimitWaitMs/1000)}s</span>}
           </div>
           <TypingIndicator typingUsers={typingUsers} />
           {uploadProgress !== null && uploadFileName && (
             <div className="w-full bg-gray-700 h-2 mt-2 relative rounded overflow-hidden">
               <div className="bg-blue-500 h-2 transition-all duration-300" style={{ width: progressValue + '%' }}></div>
-              <span className="absolute left-2 top-[-20px] text-xs text-white">{uploadFileName} {progressValue.toFixed(0)}%</span>
+              <span className="absolute left-2 top-[-20px] text-xs text-white truncate max-w-full">{uploadFileName} {progressValue.toFixed(0)}%</span>
             </div>
           )}
           <Toasts />

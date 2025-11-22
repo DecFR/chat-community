@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type SyntheticEvent } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useServerStore } from '../stores/serverStore';
@@ -13,6 +13,35 @@ import MemberList from '../components/MemberList';
 import UserSettingsModal from '../components/UserSettingsModal';
 import NotificationCenter from '../components/NotificationCenter';
 
+// 类型定义
+interface MessageItem {
+  id: string;
+  authorId: string;
+  channelId?: string;
+  content?: string;
+}
+
+interface SocketMessage {
+  authorId: string;
+  channelId?: string;
+  content?: string;
+  attachments?: unknown[];
+  author?: {
+    username: string;
+  };
+}
+
+interface FriendStatusData {
+  userId: string;
+  status: string;
+}
+
+interface UserProfileUpdateData {
+  userId: string;
+  avatarUrl?: string;
+  username?: string;
+}
+
 export default function MainLayout() {
   const navigate = useNavigate();
   const { user, isAuthenticated, loadUser } = useAuthStore();
@@ -22,15 +51,15 @@ export default function MainLayout() {
   const [showSettings, setShowSettings] = useState(false);
   const { incrementChannel, incrementDM, setChannelCount, setDMCount } = useUnreadStore();
 
-  // 初始未读加载（基于 lastReadMessageId 差集）
+  // 核心适配逻辑：判断是否在具体的聊天页面
+  const isChatView = location.pathname.startsWith('/app/channel/') || location.pathname.startsWith('/app/dm/');
+
+  // 初始未读加载
   useEffect(() => {
     const run = async () => {
       if (!user) return;
-      // 需要服务器和好友列表
-      // 等待服务器加载完成
       if (!isServersLoaded) return;
       try {
-        // 频道未读
         const channels = (useServerStore.getState().servers || []).flatMap((s) => s.channels || []);
         await Promise.all(
           channels.map(async (ch) => {
@@ -38,22 +67,22 @@ export default function MainLayout() {
               const stateRes = await messageAPI.getChannelState(ch.id);
               const lastRead = stateRes.data?.data?.lastReadMessageId as string | undefined;
               if (!lastRead) {
-                // 没有已读状态，默认 0，避免噪音
                 setChannelCount(ch.id, 0);
                 return;
               }
               const msgsRes = await messageAPI.getChannelMessages(ch.id, 100, undefined, lastRead);
-              const msgs = msgsRes.data?.data || [];
-              const count = msgs.filter((m: any) => m.authorId !== user.id).length;
+              const msgs = (msgsRes.data?.data || []) as MessageItem[];
+              const count = msgs.filter((m) => m.authorId !== user.id).length;
               setChannelCount(ch.id, count);
-            } catch {}
+            } catch {
+              // ignore
+            }
           })
         );
 
-        // 私聊未读
-        const friends = (useFriendStore.getState().friends || []);
+        const friendsList = (useFriendStore.getState().friends || []);
         await Promise.all(
-          friends.map(async (f) => {
+          friendsList.map(async (f) => {
             try {
               const stateRes = await messageAPI.getConversationState(f.id);
               const convId = stateRes.data?.data?.conversationId as string | undefined;
@@ -63,10 +92,12 @@ export default function MainLayout() {
                 return;
               }
               const msgsRes = await messageAPI.getConversationMessages(convId, 100, undefined, lastRead);
-              const msgs = msgsRes.data?.data || [];
-              const count = msgs.filter((m: any) => m.authorId !== user.id).length;
+              const msgs = (msgsRes.data?.data || []) as MessageItem[];
+              const count = msgs.filter((m) => m.authorId !== user.id).length;
               setDMCount(f.id, count);
-            } catch {}
+            } catch {
+              // ignore
+            }
           })
         );
       } catch (e) {
@@ -81,26 +112,15 @@ export default function MainLayout() {
       navigate('/login');
       return;
     }
-
-    // 初始加载
     loadUser();
-    if (!isServersLoaded) {
-      loadServers();
-    }
+    if (!isServersLoaded) loadServers();
     loadFriends();
     loadPendingRequests();
 
-    // 监听好友状态更新
-    const handleFriendStatusUpdate = (data: any) => {
-      updateFriendStatus(data.userId, data.status);
-    };
+    const handleFriendStatusUpdate = (data: FriendStatusData) => updateFriendStatus(data.userId, data.status);
     socketService.on('friendStatusUpdate', handleFriendStatusUpdate);
-
-    // 监听好友请求被接受
-    const handleFriendRequestAccepted = () => {
-      // 重新加载好友列表
-      loadFriends();
-    };
+    
+    const handleFriendRequestAccepted = () => loadFriends();
     socketService.on('friendRequestAccepted', handleFriendRequestAccepted);
 
     return () => {
@@ -109,27 +129,12 @@ export default function MainLayout() {
     };
   }, [isAuthenticated, navigate, loadUser, isServersLoaded, loadServers, loadFriends, loadPendingRequests, updateFriendStatus]);
 
-  // 当服务器加载完成后，立即加入所有服务器房间
-  useEffect(() => {
-    // 不再在连接时自动加入所有服务器房间；
-    // 改为在用户点击某个服务器时由客户端按需调用 socketService.joinServer(serverId)，
-    // 这样可以显著降低连接时的房间开销并按需加入。
-    return;
-  }, [isServersLoaded, servers]);
+  useEffect(() => { return; }, [isServersLoaded, servers]);
 
-  // 监听服务器和频道变化,实时更新
   useEffect(() => {
     if (!isAuthenticated || !user) return;
-
-    const handleServerUpdate = () => {
-      console.log('[MainLayout] Server updated, reloading...');
-      loadServers();
-    };
-
-    const handleChannelUpdate = () => {
-      console.log('[MainLayout] Channel updated, reloading...');
-      loadServers();
-    };
+    const handleServerUpdate = () => loadServers();
+    const handleChannelUpdate = () => loadServers();
 
     socketService.on('serverCreated', handleServerUpdate);
     socketService.on('serverUpdated', handleServerUpdate);
@@ -148,14 +153,10 @@ export default function MainLayout() {
     };
   }, [isAuthenticated, user, loadServers]);
 
-  // 路由守卫：当路径为 /app（主页）时，强制清空服务器/频道选择，避免任何副作用重新选中
   useEffect(() => {
-    if (location.pathname === '/app') {
-      selectServer('');
-    }
+    if (location.pathname === '/app') selectServer('');
   }, [location.pathname, selectServer]);
 
-  // 当直接访问频道路由时，自动 join 对应服务器的 socket 房间（按需加入）
   useEffect(() => {
     if (!user || !isAuthenticated) return;
     const path = location.pathname;
@@ -163,24 +164,22 @@ export default function MainLayout() {
     const parts = path.split('/');
     const channelId = parts[parts.length - 1];
     if (!channelId) return;
-
-    // 查找该频道所属服务器并 join
     const server = servers.find((s) => (s.channels || []).some((c) => c.id === channelId));
+    // 🟢 修复：移除了 catch(e) 中的 e
     if (server) {
       try {
         socketService.joinServer(server.id);
         selectServer(server.id);
-      } catch (e) {
+      } catch {
         // ignore
       }
     }
   }, [location.pathname, user, isAuthenticated, servers, selectServer]);
 
-  // 监听自身资料更新（头像、昵称）以便全局同步
   useEffect(() => {
     const currentUserId = user?.id;
     if (!currentUserId) return;
-    const handleSelfProfileUpdate = (data: { userId: string; avatarUrl?: string; username?: string }) => {
+    const handleSelfProfileUpdate = (data: UserProfileUpdateData) => {
       if (data.userId !== currentUserId) return;
       useAuthStore.getState().updateUser({
         ...(data.avatarUrl !== undefined && { avatarUrl: data.avatarUrl }),
@@ -193,25 +192,16 @@ export default function MainLayout() {
     };
   }, [user?.id]);
 
-  // 全局监听新消息以更新未读计数
   useEffect(() => {
     if (!user) return;
-
     const getActiveTarget = () => {
       const path = location.pathname;
-      if (path.startsWith('/app/channel/')) {
-        const id = path.split('/').pop()!;
-        return { type: 'channel' as const, id };
-      }
-      if (path.startsWith('/app/dm/')) {
-        const id = path.split('/').pop()!;
-        return { type: 'dm' as const, id };
-      }
+      if (path.startsWith('/app/channel/')) return { type: 'channel' as const, id: path.split('/').pop()! };
+      if (path.startsWith('/app/dm/')) return { type: 'dm' as const, id: path.split('/').pop()! };
       return { type: 'none' as const, id: '' };
     };
 
-    const handleChannelMessage = (msg: any) => {
-      // 自己发送的不计未读
+    const handleChannelMessage = (msg: SocketMessage) => {
       if (msg.authorId === user.id) return;
       const active = getActiveTarget();
       if (!(active.type === 'channel' && active.id === msg.channelId)) {
@@ -219,11 +209,9 @@ export default function MainLayout() {
       }
     };
 
-    const handleDirectMessage = (msg: any) => {
-      // 自己发送的不计未读
+    const handleDirectMessage = (msg: SocketMessage) => {
       if (msg.authorId === user.id) return;
       const active = getActiveTarget();
-      // 在 DM 页时，路由最后一段即为对方的 userId
       const friendId = msg.authorId;
       if (!(active.type === 'dm' && active.id === friendId)) {
         incrementDM(friendId);
@@ -237,11 +225,8 @@ export default function MainLayout() {
     const socket = socketService.getSocket();
     if (!socket) return;
     
-    // 先移除可能存在的旧监听器,防止重复注册
     socket.off('channelMessage');
     socket.off('directMessage');
-    
-    // 注册新监听器
     socket.on('channelMessage', handleChannelMessage);
     socket.on('directMessage', handleDirectMessage);
 
@@ -251,17 +236,11 @@ export default function MainLayout() {
     };
   }, [location.pathname, user?.id, incrementChannel, incrementDM]);
 
-  // 应用用户的主题设置
   useEffect(() => {
     if (user?.settings?.theme) {
       const body = document.body;
       const theme = user.settings.theme;
-      
-      if (theme === 'LIGHT') {
-        body.classList.add('light-theme');
-      } else {
-        body.classList.remove('light-theme');
-      }
+      if (theme === 'LIGHT') body.classList.add('light-theme'); else body.classList.remove('light-theme');
     }
   }, [user]);
 
@@ -274,43 +253,52 @@ export default function MainLayout() {
   }
 
   return (
-    <div className="h-screen flex bg-discord-dark overflow-hidden">
-      {/* 最左侧：服务器列表 */}
-      <ServerList />
-
-      {/* 中间：频道/好友列表（管理员面板时隐藏以扩大空间） */}
-      {!(location.pathname.startsWith('/app/admin')) && <ChannelList />}
+    <div className="h-screen flex bg-discord-dark overflow-hidden relative w-full">
+      {/* 侧边栏容器 */}
+      <div className={`flex h-full shrink-0 ${isChatView ? 'hidden md:flex' : 'flex w-full md:w-auto'}`}>
+        <ServerList />
+        
+        {!(location.pathname.startsWith('/app/admin')) && (
+          <div className="w-full md:w-60 flex flex-col border-r border-discord-darkest bg-discord-gray">
+             <ChannelList />
+             {/* 手机端底部导航 */}
+             <div className="h-14 bg-discord-darker flex items-center justify-around px-4 border-t border-discord-darkest md:hidden mt-auto">
+               <NotificationCenter />
+               <button onClick={() => setShowSettings(true)} className="p-2 rounded hover:bg-discord-gray">
+                 <img 
+                   src={user.avatarUrl || undefined} 
+                   className="w-8 h-8 rounded-full bg-gray-600 object-cover"
+                   alt={user.username}
+                   onError={(e: SyntheticEvent<HTMLImageElement, Event>) => (e.currentTarget.style.display = 'none')}
+                 />
+                 {!user.avatarUrl && (
+                   <div className="w-8 h-8 rounded-full bg-gray-600 flex items-center justify-center text-white font-bold">
+                     {user.username.substring(0, 2).toUpperCase()}
+                   </div>
+                 )}
+               </button>
+             </div>
+          </div>
+        )}
+      </div>
 
       {/* 主内容区域 */}
-      <div className="flex-1 flex flex-col min-h-0 min-w-0">
-        {/* 顶部状态栏 */}
-        <div className="h-12 bg-discord-darker border-b border-discord-darkest flex items-center justify-end px-4 gap-2">
+      <div className={`flex-1 flex flex-col min-h-0 min-w-0 bg-discord-gray ${isChatView ? 'flex z-20 absolute inset-0 md:static md:z-0' : 'hidden md:flex'}`}>
+        <div className="hidden md:flex h-12 bg-discord-darker border-b border-discord-darkest items-center justify-end px-4 gap-2 shrink-0">
           <NotificationCenter />
-          <button
-            onClick={() => setShowSettings(true)}
-            className="p-2 rounded hover:bg-discord-gray transition-colors"
-            title="用户设置"
-          >
-            <svg className="w-5 h-5 text-discord-light-gray" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" />
-            </svg>
+          <button onClick={() => setShowSettings(true)} className="p-2 rounded hover:bg-discord-gray transition-colors" title="用户设置">
+            <svg className="w-5 h-5 text-discord-light-gray" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" /></svg>
           </button>
         </div>
 
-        {/* 让子路由区域可滚动而不撑高父容器 */}
         <Outlet />
       </div>
 
-      {/* 右侧：成员列表 */}
-      <MemberList />
+      <div className="hidden md:block h-full">
+        <MemberList />
+      </div>
 
-      {/* 用户设置模态框 */}
-      {showSettings && (
-        <UserSettingsModal
-          isOpen={showSettings}
-          onClose={() => setShowSettings(false)}
-        />
-      )}
+      {showSettings && <UserSettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />}
     </div>
   );
 }
