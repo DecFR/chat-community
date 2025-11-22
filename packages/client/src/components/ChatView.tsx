@@ -1,5 +1,5 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom'; // 🟢 修复：引入 useNavigate
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useServerStore } from '../stores/serverStore';
 import { useFriendStore } from '../stores/friendStore';
 import { useAuthStore } from '../stores/authStore';
@@ -54,7 +54,7 @@ const formatFileSize = (bytes: number | undefined) => {
 
 export default function ChatView({ isDM = false }: ChatViewProps) {
   const { channelId, friendId } = useParams();
-  const navigate = useNavigate(); // 🟢 修复：声明 navigate
+  const navigate = useNavigate();
   const { servers, isLoading: isLoadingServers } = useServerStore();
   const { friends } = useFriendStore();
   const { user } = useAuthStore();
@@ -471,7 +471,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
       socket.off('friendRemoved', handleFriendRemoved);
       socket.off('messageRateLimited', handleRateLimited);
     };
-  }, [isDM, friendId, channelId, user?.id, markAsRead]); // 🟢 修复：添加 markAsRead 依赖
+  }, [isDM, friendId, channelId, user?.id, markAsRead]);
 
   useEffect(() => {
     const socket = socketService.getSocket();
@@ -501,59 +501,98 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
       }, 1000);
       return () => clearTimeout(timer);
     }
-  }, [messages, isNearBottom, markAsRead]); // 🟢 修复：添加 markAsRead 依赖
+  }, [messages, isNearBottom, markAsRead]);
 
-  const handleSendMessage = (e: React.FormEvent) => {
+  // --------------------------------------------------------------
+  // 🟢 修复：发送消息逻辑 (原子操作 + 3GB 限制 + 错误处理)
+  // --------------------------------------------------------------
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (rateLimitWaitMs > 0) return;
     if (!newMessage.trim() && pendingFiles.length === 0) return;
 
-    const send = async () => {
-      let attachments: Array<{
-        url: string;
-        type: 'IMAGE' | 'VIDEO' | 'FILE';
-        filename?: string;
-        mimeType?: string;
-        size?: number;
-      }> | undefined;
-      if (pendingFiles.length > 0) {
-        attachments = [];
-        for (const f of pendingFiles) {
-          const maxSize = 3 * 1024 * 1024 * 1024; // 3GB
-          if (f.size > maxSize) {
-            toastStore.addToast({ message: `文件过大！${formatFileSize(f.size)}`, type: 'error' });
-            continue;
-          }
+    // 1. 准备附件数组
+    const attachments: Array<{
+      url: string;
+      type: 'IMAGE' | 'VIDEO' | 'FILE';
+      filename?: string;
+      mimeType?: string;
+      size?: number;
+    }> = [];
+
+    // 2. 如果有文件，先执行上传
+    if (pendingFiles.length > 0) {
+      // 3GB 限制 (3221225472 bytes)
+      const MAX_SIZE = 3221225472; 
+
+      for (const f of pendingFiles) {
+        if (f.size > MAX_SIZE) {
+          toastStore.addToast({ message: `文件 "${f.name}" 超过 3GB 限制`, type: 'error' });
+          // 遇到大文件直接终止整个发送流程
+          return; 
+        }
+
+        try {
           setUploadFileName(f.name);
-          await uploadFileInChunks({
+          setUploadProgress(0);
+          
+          // 等待上传完成 (Promise based)
+          const url = await uploadFileInChunks({
             file: f,
             chunkSize: 5 * 1024 * 1024,
             onProgress: (percent) => setUploadProgress(percent),
-            onError: (err) => toastStore.addToast({ message: '上传失败: ' + err.message, type: 'error' }),
-            onComplete: (url) => {
-              let type: 'IMAGE' | 'VIDEO' | 'FILE' = 'FILE';
-              if (f.type.startsWith('image/')) type = 'IMAGE';
-              else if (f.type.startsWith('video/')) type = 'VIDEO';
-              
-              (attachments ?? []).push({ url, type, filename: f.name, mimeType: f.type, size: f.size });
-              setUploadProgress(null);
-              setUploadFileName(null);
-              toastStore.addToast({ message: '文件上传成功', type: 'success' });
-            },
           });
+
+          let type: 'IMAGE' | 'VIDEO' | 'FILE' = 'FILE';
+          if (f.type.startsWith('image/')) type = 'IMAGE';
+          else if (f.type.startsWith('video/')) type = 'VIDEO';
+
+          attachments.push({
+            url,
+            type,
+            filename: f.name,
+            mimeType: f.type,
+            size: f.size,
+          });
+
+          toastStore.addToast({ message: `文件 "${f.name}" 上传成功`, type: 'success' });
+
+        } catch (err: unknown) {
+          // 🟢 修复：打印错误日志解决 no-unused-vars，并使用 unknown 类型安全检查
+          console.error('Upload error:', err);
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          
+          toastStore.addToast({ message: `文件 "${f.name}" 上传失败: ${errorMessage}`, type: 'error' });
+          setUploadProgress(null);
+          setUploadFileName(null);
+          
+          // 关键：只要有一个文件失败，就终止发送
+          return; 
         }
       }
+      
+      // 所有文件上传成功后，清理进度条状态
+      setUploadProgress(null);
+      setUploadFileName(null);
+    }
 
+    // 3. 只有当（没有文件）或者（所有文件都上传成功）时，才发送消息
+    try {
       if (isDM && friendId) {
-        socketService.sendDirectMessage(friendId, newMessage, attachments);
+        socketService.sendDirectMessage(friendId, newMessage, attachments.length > 0 ? attachments : undefined);
       } else if (channelId) {
-        socketService.sendChannelMessage(channelId, newMessage, attachments);
+        socketService.sendChannelMessage(channelId, newMessage, attachments.length > 0 ? attachments : undefined);
       }
-    };
-    send();
-    setNewMessage('');
-    setPendingFiles([]);
-    setTimeout(() => markAsRead(), 500);
+      
+      // 4. 发送成功后才清空输入框和文件列表
+      setNewMessage('');
+      setPendingFiles([]);
+      setTimeout(() => markAsRead(), 500);
+      
+    } catch (err) {
+      console.error('Failed to send message:', err);
+      toastStore.addToast({ message: '消息发送失败', type: 'error' });
+    }
   };
 
   if (!isDM && channelId && isLoadingServers && !currentChannel) {
