@@ -104,38 +104,28 @@ export function initializeSocket(httpServer: HttpServer) {
 
       // 检查是否有其他活跃的Socket连接（单点登录控制）
       if (session.socketId && session.socketId !== socket.id) {
-        // 仅向旧的 socketId 发送 forceLogout：先确认旧 ID 是真实的 socket id，
-        // 避免把用户房间名（例如 `user-<id>`）误当作 socket id 广播到所有设备。
         const oldSocketId = session.socketId;
-        try {
-          const socketsMap = io.sockets.sockets as Map<string, Socket>;
-          const found = socketsMap.has(oldSocketId);
-          // 记录触发信息以便排查（临时日志）
-          logger.info(`forceLogout check: sessionId=${session.id} oldSocketId=${oldSocketId} currentSocketId=${socket.id} found=${found}`);
+        const socketsMap = io.sockets.sockets as Map<string, Socket>;
+        
+        // 🔴 关键修复：检查旧 Socket 是否真的还活着
+        const isOldSocketActive = socketsMap.has(oldSocketId);
 
-          // 仅当旧 socketId 在当前 socket 列表中存在时才发送强制登出
-          if (found) {
-            logger.info(`Emitting forceLogout to socket ${oldSocketId} for user ${socket.username}`);
-            io.to(oldSocketId).emit('forceLogout', {
-              reason: 'new_login',
-              message: '您的账号在其他设备登录',
-            });
+        if (isOldSocketActive) {
+          // 只有当旧连接 *真的* 在线时，才认为是冲突
+          logger.info(`forceLogout check: Found active old socket ${oldSocketId}. Kicking it out.`);
+          
+          io.to(oldSocketId).emit('forceLogout', {
+            reason: 'new_login',
+            message: '您的账号在其他设备登录',
+          });
 
-            const oldSocket = socketsMap.get(oldSocketId);
-            if (oldSocket && typeof oldSocket.disconnect === 'function') {
-              try {
-                oldSocket.disconnect(true);
-                logger.info(`Disconnected old socket ${oldSocketId} for user ${socket.username}`);
-              } catch (e) {
-                logger.debug('Failed to forcibly disconnect old socket:', e);
-              }
-            }
-          } else {
-            // 旧的 socketId 不在当前实例中，可能是房间名或过期 id，跳过以避免误广播
-            logger.debug(`Old socketId ${oldSocketId} for user ${socket.username} not found among active sockets; skipping forceLogout emit.`);
+          const oldSocket = socketsMap.get(oldSocketId);
+          if (oldSocket) {
+            oldSocket.disconnect(true);
           }
-        } catch (e) {
-          logger.error('Error notifying old socket about forceLogout:', e);
+        } else {
+          // 如果旧 ID 不在线（可能是刷新页面导致的残留），则忽略，允许新连接覆盖
+          logger.debug(`Session has old socketId ${oldSocketId} but it is not active. Assuming page refresh.`);
         }
       }
 

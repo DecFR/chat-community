@@ -53,6 +53,7 @@ if (enableCluster && cluster.isPrimary) {
     import('./routes/admin.routes.js'),
     import('./routes/serverRequest.routes.js'),
     import('./routes/invite.routes.js'),
+    import('./routes/chunk-upload.routes.js'),
     import('./utils/avatarCleanupScheduler.js'),
     import('./utils/sessionCleanupScheduler.js'),
     import('./utils/perfMonitor.js'),
@@ -74,6 +75,7 @@ if (enableCluster && cluster.isPrimary) {
         { default: adminRoutes },
         { default: serverRequestRoutes },
         { default: inviteRoutes },
+        { default: chunkUploadRoutes },
         { startAvatarCleanupScheduler },
         { startSessionCleanupScheduler },
         { startPerfMonitor },
@@ -143,9 +145,8 @@ if (enableCluster && cluster.isPrimary) {
         );
         app.use('/api/auth', authRoutes);
         // 分片上传路由
-        import('./routes/chunk-upload.routes.js').then(({ default: chunkUploadRoutes }) => {
-          app.use('/api', chunkUploadRoutes);
-        });
+        app.use('/api', chunkUploadRoutes);
+
         app.use('/api/users', userRoutes);
         app.use('/api/friends', friendRoutes);
         app.use('/api/servers', serverRoutes);
