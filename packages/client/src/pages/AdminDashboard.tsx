@@ -873,37 +873,105 @@ function PersistentCleanupConfig() {
   );
 }
 
+// 子组件：系统信息面板 (已恢复详细数据)
 function SystemInfoPanel() {
   const [info, setInfo] = useState<SystemInfoData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    adminAPI.getSystemInfo().then(res => setInfo(res.data.data || res.data)).finally(() => setLoading(false));
+    let mounted = true;
+    adminAPI.getSystemInfo()
+      .then(res => {
+        if(mounted) setInfo(res.data.data || res.data);
+      })
+      .catch(err => {
+        if(mounted) setError('无法获取系统信息');
+        console.error(err);
+      })
+      .finally(() => {
+        if(mounted) setLoading(false);
+      });
+    return () => { mounted = false; };
   }, []);
 
-  if (loading) return <div className="card text-gray-400">加载系统信息...</div>;
-
-  const formatBytes = (bytes: number) => {
+  const formatBytes = (bytes?: number) => {
+    if (!bytes && bytes !== 0) return '-';
     if (bytes === 0) return '0 B';
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + ['B', 'KB', 'MB', 'GB'][i];
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
+
+  const formatUptime = (seconds?: number) => {
+    if (!seconds) return '-';
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    return `${days}天 ${hours}小时 ${mins}分钟`;
+  };
+
+  if (loading) return <div className="card text-gray-400">加载硬件信息...</div>;
+  if (error) return <div className="card text-red-400">{error}</div>;
 
   return (
     <div className="card">
-      <h3 className="text-lg font-semibold text-white mb-4">服务器状态</h3>
-      <div className="grid grid-cols-2 gap-4 text-sm">
-        <div className="bg-discord-darkest p-3 rounded">
-          <div className="text-gray-500">CPU</div>
-          <div className="text-white text-lg">{info?.cpu?.cores || 1} <span className="text-xs">核</span></div>
+      <div className="flex items-center gap-2 mb-4">
+        <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+        </svg>
+        <h3 className="text-lg font-semibold text-white">服务器硬件信息</h3>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* CPU 型号 - 占据整行 (在电脑上) */}
+        <div className="bg-discord-darkest rounded-lg p-4 md:col-span-2">
+          <div className="text-sm text-gray-400 mb-1">CPU 型号</div>
+          <div className="text-white font-medium font-mono text-sm break-all">
+            {info?.cpu?.model || '未知型号'}
+          </div>
         </div>
-        <div className="bg-discord-darkest p-3 rounded">
-          <div className="text-gray-500">内存占用</div>
-          <div className="text-white text-lg">{formatBytes(info?.memory?.used || 0)}</div>
+
+        {/* CPU 核心数 */}
+        <div className="bg-discord-darkest rounded-lg p-4">
+          <div className="text-sm text-gray-400 mb-1">CPU 核心/线程</div>
+          <div className="text-white font-medium text-2xl">
+            {info?.cpu?.cores || 0} <span className="text-base text-gray-500">线程</span>
+          </div>
         </div>
-        <div className="bg-discord-darkest p-3 rounded col-span-2">
-          <div className="text-gray-500">运行时间</div>
-          <div className="text-white">{Math.floor((info?.uptime || 0) / 86400)} 天</div>
+
+        {/* 内存使用情况 */}
+        <div className="bg-discord-darkest rounded-lg p-4">
+          <div className="text-sm text-gray-400 mb-1">内存 (已用 / 总计)</div>
+          <div className="text-white font-medium">
+            {formatBytes(info?.memory?.used)} / {formatBytes(info?.memory?.total)}
+          </div>
+          <div className="mt-2 w-full bg-gray-700 rounded-full h-2.5">
+            <div 
+              className="bg-blue-600 h-2.5 rounded-full" 
+              style={{ width: `${info?.memory?.usagePercent || 0}%` }}
+            ></div>
+          </div>
+          <div className="text-right text-xs text-gray-400 mt-1">
+            使用率: {info?.memory?.usagePercent}%
+          </div>
+        </div>
+
+        {/* 系统平台 */}
+        <div className="bg-discord-darkest rounded-lg p-4">
+          <div className="text-sm text-gray-400 mb-1">系统平台</div>
+          <div className="text-white font-medium capitalize">
+            {info?.platform || 'Unknown'} <span className="text-gray-500">({info?.arch})</span>
+          </div>
+        </div>
+
+        {/* 运行时间 */}
+        <div className="bg-discord-darkest rounded-lg p-4">
+          <div className="text-sm text-gray-400 mb-1">系统运行时间</div>
+          <div className="text-white font-medium">
+            {formatUptime(info?.uptime)}
+          </div>
         </div>
       </div>
     </div>
