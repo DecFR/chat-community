@@ -13,10 +13,10 @@ export default function ServerList() {
   const navigate = useNavigate();
   const location = useLocation();
   const adminActive = location.pathname.startsWith('/app/admin');
-  const homeActive = location.pathname === '/app';
+  const homeActive = location.pathname === '/app' && !currentServerId;
   const [showAddModal, setShowAddModal] = useState(false);
-  const hasAutoSelected = useRef(false); // 标记是否已经自动选择过服务器(仅首轮)
-  const initialPathRef = useRef<string>(window.location.pathname); // 记录挂载时的URL
+  const hasAutoSelected = useRef(false); 
+  const initialPathRef = useRef<string>(window.location.pathname);
 
   // Socket实时更新监听
   useEffect(() => {
@@ -31,7 +31,7 @@ export default function ServerList() {
     socket.on('serverUpdate', handleServerUpdate);
     socket.on('serverDelete', handleServerUpdate);
     socket.on('serverMemberUpdate', handleServerUpdate);
-    // 加入申请批准后：自动加入 socket 房间并刷新
+    
     const handleJoinApproved = (data: { serverId: string }) => {
       socketService.joinServer(data.serverId);
       loadServers();
@@ -48,9 +48,8 @@ export default function ServerList() {
   }, [loadServers]);
 
   const handleHomeClick = () => {
-    // 先清空状态，然后导航
     selectServer('');
-    navigate('/app', { replace: true });
+    navigate('/app');
   };
 
   const handleServerClick = (serverId: string) => {
@@ -62,24 +61,22 @@ export default function ServerList() {
       return;
     }
     
-    if (!server.channels || server.channels.length === 0) {
-      console.warn(`Server ${serverId} has no channels.`);
-      alert('该服务器还没有频道，请刷新页面后重试或联系管理员。');
-      return;
-    }
-    
+    // 🟢 核心修改：只选中服务器，不自动跳转到频道
     selectServer(serverId);
-    // 按需加入服务器房间，保证进入服务器后能接收频道消息
+    
+    // 仍然加入 Socket 房间以接收通知
     try {
       socketService.joinServer(serverId);
-    } catch (e) {
+    } catch {
       // ignore
     }
-    navigate(`/app/channel/${server.channels[0].id}`);
+    
+    // 如果当前已经在某个频道页，点击同服务器图标可以跳回该服务器根路径（可选体验优化）
+    // 这里我们选择跳转到 /app，让 MainLayout 显示频道列表
+    navigate('/app');
   };
 
-  // 首次加载：仅依据“初始URL”决定是否需要根据频道自动选中服务器
-  // 这样后续从频道返回 /app 时，不会被此逻辑再次干扰
+  // 首次加载：根据 URL 自动选中服务器
   useEffect(() => {
     const pathname = initialPathRef.current;
     if (isServersLoaded && !hasAutoSelected.current && pathname.includes('/app/channel/')) {
@@ -94,11 +91,11 @@ export default function ServerList() {
         }
       }
     }
-    }, [isServersLoaded, servers, selectServer]);
+  }, [isServersLoaded, servers, selectServer]);
 
   return (
      <>
-    <div className="w-18 bg-discord-darkest flex flex-col items-center py-3 space-y-2 overflow-y-auto scrollbar-thin">
+    <div className="w-18 bg-discord-darkest flex flex-col items-center py-3 space-y-2 overflow-y-auto scrollbar-thin shrink-0">
       {/* Home 按钮 */}
       <button
         onClick={handleHomeClick}
@@ -141,7 +138,7 @@ export default function ServerList() {
               </span>
             )}
           </button>
-          {/* 退出按钮：非 owner 且当前用户点击显示 */}
+          
           {user && server.ownerId !== user.id && (
             <button
               onClick={(e) => {
@@ -153,7 +150,7 @@ export default function ServerList() {
                 }
               }}
               title="退出服务器"
-              className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-red-600 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow"
+              className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-red-600 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow cursor-pointer z-10"
             >
               ×
             </button>
@@ -176,7 +173,7 @@ export default function ServerList() {
           <div className="w-8 h-0.5 bg-discord-gray rounded-full"></div>
           <button
             onClick={() => {
-              selectServer(null!);
+              selectServer(''); // 🟢 修复：使用空字符串而非 null!
               navigate('/app/admin');
             }}
             className={`w-12 h-12 rounded-full transition-all flex items-center justify-center ${

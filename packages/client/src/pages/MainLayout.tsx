@@ -62,7 +62,7 @@ export default function MainLayout() {
 
   const isChatView = location.pathname.startsWith('/app/channel/') || location.pathname.startsWith('/app/dm/');
 
-  // 🟢 修复 1：依赖改为 user?.id，防止对象引用变化导致死循环
+  // 初始未读加载
   useEffect(() => {
     const run = async () => {
       if (!user?.id) return;
@@ -114,7 +114,7 @@ export default function MainLayout() {
     };
     run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, isServersLoaded, friends.length]); // 仅在 ID 变化或列表长度变化时运行
+  }, [user?.id, isServersLoaded, friends.length]);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -139,10 +139,8 @@ export default function MainLayout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, navigate]);
 
-  // 仅用于触发重新渲染，无逻辑副作用
   useEffect(() => { return; }, [isServersLoaded, servers]);
 
-  // 🟢 修复 2：监听器依赖改为 user?.id
   useEffect(() => {
     if (!isAuthenticated || !user?.id) return;
     const handleServerUpdate = () => loadServers();
@@ -165,11 +163,9 @@ export default function MainLayout() {
     };
   }, [isAuthenticated, user?.id, loadServers]);
 
-  useEffect(() => {
-    if (location.pathname === '/app') selectServer('');
-  }, [location.pathname, selectServer]);
+  // 🟢 修复：移除了在这里强制 selectServer('') 的逻辑，
+  // 这样当路由为 /app 时，我们可以保留当前选中的服务器 ID
 
-  // 🟢 修复 3：自动加入房间依赖改为 user?.id
   useEffect(() => {
     if (!user?.id || !isAuthenticated) return;
     const path = location.pathname;
@@ -204,7 +200,6 @@ export default function MainLayout() {
     };
   }, [user?.id]);
 
-  // 🟢 修复 4：消息监听依赖改为 user?.id
   useEffect(() => {
     if (!user?.id) return;
     const getActiveTarget = () => {
@@ -267,14 +262,12 @@ export default function MainLayout() {
 
   return (
     <div className="h-screen flex bg-discord-dark overflow-hidden relative w-full">
-      {/* 侧边栏容器 */}
       <div className={`flex h-full shrink-0 ${isChatView ? 'hidden md:flex' : 'flex w-full md:w-auto'}`}>
         <ServerList />
         
         {!(location.pathname.startsWith('/app/admin')) && (
           <div className="w-full md:w-60 flex flex-col border-r border-discord-darkest bg-discord-gray">
              <ChannelList />
-             {/* 手机端底部导航 */}
              <div className="h-14 bg-discord-darker flex items-center justify-around px-4 border-t border-discord-darkest md:hidden mt-auto">
                <NotificationCenter />
                <button onClick={() => setShowSettings(true)} className="p-2 rounded hover:bg-discord-gray">
@@ -289,7 +282,6 @@ export default function MainLayout() {
         )}
       </div>
 
-      {/* 主内容区域 */}
       <div className={`flex-1 flex flex-col min-h-0 min-w-0 bg-discord-gray ${isChatView ? 'flex z-20 absolute inset-0 md:static md:z-0' : 'hidden md:flex'}`}>
         <div className="hidden md:flex h-12 bg-discord-darker border-b border-discord-darkest items-center justify-end px-4 gap-2 shrink-0">
           <NotificationCenter />
