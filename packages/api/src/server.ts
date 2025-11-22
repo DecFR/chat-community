@@ -1,13 +1,21 @@
-import 'dotenv/config';
 import cluster from 'cluster';
+import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+import 'dotenv/config';
+import dotenv from 'dotenv';
+
 import logger from './utils/logger.js';
+
+dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const uploadDir = process.env.UPLOAD_DIR || 'uploads';
+const absoluteUploadPath = path.resolve(process.cwd(), uploadDir);
+console.log(`Checking upload directory: ${absoluteUploadPath}`);
 
 const cpuCores = os.cpus().length;
 const isSingleCore = cpuCores <= 1;
@@ -74,6 +82,16 @@ if (enableCluster && cluster.isPrimary) {
         // 注意：authMiddlewareModule 包含 passport 本身，因为它是这样导出的
         // 我们在这里不需要直接使用它，因为 passport.initialize() 会处理
         const PORT = process.env.PORT || 3000;
+        if (!fs.existsSync(absoluteUploadPath)) {
+          try {
+            fs.mkdirSync(absoluteUploadPath, { recursive: true });
+            console.log(`✅ Upload directory created successfully at: ${absoluteUploadPath}`);
+          } catch (error) {
+            console.error('❌ Failed to create upload directory:', error);
+          }
+        } else {
+          console.log(`✅ Upload directory exists.`);
+        }
         const app: import('express').Application = express();
         const httpServer = http.createServer(app);
         app.use(
