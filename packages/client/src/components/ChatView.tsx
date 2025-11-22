@@ -519,7 +519,7 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
       if (pendingFiles.length > 0) {
         attachments = [];
         for (const f of pendingFiles) {
-          const maxSize = 100 * 1024 * 1024;
+          const maxSize = 10 * 1024 * 1024 * 1024;
           if (f.size > maxSize) {
             toastStore.addToast({ message: `文件过大！${(f.size / 1024 / 1024).toFixed(2)} MB`, type: 'error' });
             continue;
