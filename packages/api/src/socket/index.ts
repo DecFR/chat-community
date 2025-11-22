@@ -46,12 +46,31 @@ let io: Server;
 // 简单的消息发送速率限制：记录用户上次发送时间戳
 const lastMessageAt = new Map<string, number>();
 // 最小发送间隔（毫秒）
-const MIN_INTERVAL_MS = 700;
+const MIN_INTERVAL_MS = 500;
 
 export function initializeSocket(httpServer: HttpServer) {
   io = new Server(httpServer, {
     cors: {
-      origin: process.env.CLIENT_URL || 'http://localhost:5173',
+      origin: (origin, callback) => {
+        // 读取配置的客户端地址
+        const allowed = process.env.CLIENT_URL || 'http://localhost:5173';
+        // 判断是否为开发环境
+        const isDev = (process.env.NODE_ENV || 'development') === 'development';
+
+        // 1. 允许无 Origin 请求 (如 Postman, 移动端 App, 或服务器内部调用)
+        if (!origin) return callback(null, true);
+
+        // 2. 生产环境：必须精确匹配 .env 里的 CLIENT_URL
+        if (origin === allowed) return callback(null, true);
+
+        // 3. 开发环境：允许 localhost 或 127.0.0.1 的任意端口
+        if (isDev && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) {
+          return callback(null, true);
+        }
+
+        // 4. 其他情况拒绝连接
+        return callback(new Error(`CORS blocked for origin: ${origin}`));
+      },
       credentials: true,
     },
   });
