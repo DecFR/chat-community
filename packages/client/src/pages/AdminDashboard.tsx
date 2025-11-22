@@ -874,6 +874,7 @@ function PersistentCleanupConfig() {
 }
 
 // 子组件：系统信息面板 (已恢复详细数据)
+// 子组件：系统信息面板 (UI 修正版)
 function SystemInfoPanel() {
   const [info, setInfo] = useState<SystemInfoData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -925,7 +926,7 @@ function SystemInfoPanel() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* CPU 型号 - 占据整行 (在电脑上) */}
+        {/* CPU 型号 */}
         <div className="bg-discord-darkest rounded-lg p-4 md:col-span-2">
           <div className="text-sm text-gray-400 mb-1">CPU 型号</div>
           <div className="text-white font-medium font-mono text-sm break-all">
@@ -933,11 +934,12 @@ function SystemInfoPanel() {
           </div>
         </div>
 
-        {/* CPU 核心数 */}
+        {/* CPU 核心数 - 修改了这里的文案 */}
         <div className="bg-discord-darkest rounded-lg p-4">
-          <div className="text-sm text-gray-400 mb-1">CPU 核心/线程</div>
-          <div className="text-white font-medium text-2xl">
-            {info?.cpu?.cores || 0} <span className="text-base text-gray-500">线程</span>
+          <div className="text-sm text-gray-400 mb-1">逻辑处理器 (线程数)</div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-white font-medium text-2xl">{info?.cpu?.cores || 0}</span>
+            <span className="text-sm text-gray-500">Threads</span>
           </div>
         </div>
 
@@ -949,12 +951,9 @@ function SystemInfoPanel() {
           </div>
           <div className="mt-2 w-full bg-gray-700 rounded-full h-2.5">
             <div 
-              className="bg-blue-600 h-2.5 rounded-full" 
+              className="bg-blue-600 h-2.5 rounded-full transition-all duration-500" 
               style={{ width: `${info?.memory?.usagePercent || 0}%` }}
             ></div>
-          </div>
-          <div className="text-right text-xs text-gray-400 mt-1">
-            使用率: {info?.memory?.usagePercent}%
           </div>
         </div>
 
