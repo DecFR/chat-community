@@ -4,6 +4,7 @@ import { userAPI, serverRequestAPI } from '../lib/api';
 import { UserAvatar } from './UserAvatar';
 import AvatarEditor from './AvatarEditor';
 import { socketService } from '../lib/socket';
+import { uploadFileInChunks } from '../lib/chunkUploader';
 
 interface UserSettingsModalProps {
   isOpen: boolean;
@@ -38,11 +39,23 @@ interface ApiError {
 
 type Tab = 'profile' | 'appearance' | 'privacy' | 'serverRequests';
 
+// URL 拼接逻辑
 const getAvatarUrl = (url: string | undefined | null) => {
   if (!url) return undefined;
-  if (url.startsWith('http') || url.startsWith('data:')) return url;
-  const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/api\/?$/, '');
-  return `${API_URL}${url.startsWith('/') ? '' : '/'}${url}`;
+  
+  if (url.startsWith('data:') || url.startsWith('blob:')) return url;
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+
+  let envApiUrl = import.meta.env.VITE_API_URL ?? '';
+  if (envApiUrl.endsWith('/api')) {
+    envApiUrl = envApiUrl.replace(/\/api$/, '');
+  }
+  if (envApiUrl.endsWith('/')) {
+    envApiUrl = envApiUrl.slice(0, -1);
+  }
+
+  const normalizedPath = url.startsWith('/') ? url : `/${url}`;
+  return `${envApiUrl}${normalizedPath}`;
 };
 
 function Toast({ message, type, onClose }: { message: string; type: 'success' | 'error'; onClose: () => void }) {
@@ -166,28 +179,53 @@ export default function UserSettingsModal({
   };
 
   const handleProfileSave = async () => {
+    // 🟢 修复：确保 user 存在
+    if (!user) return;
+    
     setIsLoading(true);
     setToast(null);
     try {
+      let newAvatarUrl = user.avatarUrl;
+
       if (avatarFile) {
-        const formData = new FormData();
-        formData.append('avatar', avatarFile);
-        await userAPI.uploadAvatar(formData);
+        try {
+          newAvatarUrl = await uploadFileInChunks({
+            file: avatarFile,
+            chunkSize: 2 * 1024 * 1024,
+            onProgress: () => {},
+          });
+        } catch (uploadErr: unknown) {
+          // 🟢 修复：安全处理 unknown 类型错误
+          const errorMessage = uploadErr instanceof Error ? uploadErr.message : String(uploadErr);
+          console.error(uploadErr);
+          throw new Error(`头像上传失败: ${errorMessage}`);
+        }
       }
-      await userAPI.updateProfile({
-        username: username !== user?.username ? username : undefined,
+
+      // 🟢 修复：构造更新对象，使用类型断言避免 TS 报错
+      const payload = {
+        username: username !== user.username ? username : undefined,
         email: email || undefined,
-      });
+        avatarUrl: newAvatarUrl !== user.avatarUrl ? newAvatarUrl : undefined,
+      };
+
+      // 如果 api 定义不支持 avatarUrl，这里强制转换一下类型
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await userAPI.updateProfile(payload as any);
+
       await refreshUser();
       setToast({ message: '个人资料已更新', type: 'success' });
+      
       setTimeout(() => {
         if (avatarPreview) URL.revokeObjectURL(avatarPreview);
         setAvatarFile(null);
         setAvatarPreview(null);
       }, 500);
+
     } catch (err) {
       const error = err as ApiError;
-      setToast({ message: error.response?.data?.message || error.message || '更新失败', type: 'error' });
+      const errorMsg = error.response?.data?.message || error.message || '更新失败';
+      setToast({ message: errorMsg, type: 'error' });
     } finally {
       setIsLoading(false);
     }
