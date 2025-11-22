@@ -56,7 +56,6 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
   // 媒体预览状态
   const [previewMedia, setPreviewMedia] = useState<{ url: string; type: 'IMAGE' | 'VIDEO' } | null>(null);
   
-  // 🟢 修复：使用 useRef 代替 window as any 来记录上次 typing 发送时间
   const lastTypingEmitTimeRef = useRef<number>(0);
 
   let currentChannel = null;
@@ -83,7 +82,6 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
   const progressValue = typeof uploadProgress === 'number' ? uploadProgress : 0;
   const inputClass = `flex-1 px-2 py-3 bg-transparent text-white placeholder-gray-500 focus:outline-none${rateLimitWaitMs > 0 ? ' opacity-60 cursor-not-allowed' : ''}`;
 
-  // 核心：媒体URL处理
   const getMediaUrl = (url: string | null | undefined): string => {
     if (!url) return '';
     if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
@@ -93,6 +91,26 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
     const normalized = url.startsWith('/') ? url : `/${url}`;
     if (!API_URL) return normalized;
     return `${API_URL}${normalized}`;
+  };
+
+  // --- 智能文件类型判断函数 ---
+  const getFileType = (att: { type: string; filename?: string; mimeType?: string }) => {
+    // 1. 如果后端明确是 IMAGE/VIDEO，直接信
+    if (att.type === 'IMAGE') return 'IMAGE';
+    if (att.type === 'VIDEO') return 'VIDEO';
+
+    // 2. 否则，根据后缀名或 mimeType 再次判断
+    const name = (att.filename || '').toLowerCase();
+    const mime = (att.mimeType || '').toLowerCase();
+
+    if (mime.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|bmp|svg)$/.test(name)) {
+      return 'IMAGE';
+    }
+    if (mime.startsWith('video/') || /\.(mp4|webm|ogg|mov|mkv)$/.test(name)) {
+      return 'VIDEO';
+    }
+
+    return 'FILE';
   };
 
   useEffect(() => {
@@ -513,7 +531,12 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
             onProgress: (percent) => setUploadProgress(percent),
             onError: (err) => toastStore.addToast({ message: '上传失败: ' + err.message, type: 'error' }),
             onComplete: (url) => {
-              (attachments ?? []).push({ url, type: f.type.startsWith('image/') ? 'IMAGE' : f.type.startsWith('video/') ? 'VIDEO' : 'FILE', filename: f.name, mimeType: f.type, size: f.size });
+              // 🟢 智能判断类型，避免默认为 FILE
+              let type: 'IMAGE' | 'VIDEO' | 'FILE' = 'FILE';
+              if (f.type.startsWith('image/')) type = 'IMAGE';
+              else if (f.type.startsWith('video/')) type = 'VIDEO';
+              
+              (attachments ?? []).push({ url, type, filename: f.name, mimeType: f.type, size: f.size });
               setUploadProgress(null);
               setUploadFileName(null);
               toastStore.addToast({ message: '文件上传成功', type: 'success' });
@@ -621,29 +644,33 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
                     </div>
                     {message.content && <p className="text-discord-light-gray break-words">{message.content}</p>}
                     
+                    {/* 🚀 附件渲染 (使用智能判断) */}
                     {message.attachments && message.attachments.length > 0 && (
                       <div className="mt-2 space-y-2 flex flex-wrap gap-2">
                         {message.attachments.map((att, idx) => {
                           const mediaUrl = getMediaUrl(att.url);
-                          if (att.type === 'IMAGE') {
+                          // 🟢 使用智能类型判断
+                          const fileType = getFileType(att);
+
+                          if (fileType === 'IMAGE') {
                             return (
                               <img
                                 key={idx}
                                 src={mediaUrl}
                                 alt={att.filename}
                                 crossOrigin="anonymous"
-                                className="max-w-xs max-h-60 rounded cursor-pointer object-cover hover:opacity-90 border border-discord-darkest"
+                                className="max-w-full sm:max-w-sm max-h-[400px] rounded cursor-pointer object-contain hover:opacity-95 border border-discord-darkest bg-black/20"
                                 onClick={() => setPreviewMedia({ url: mediaUrl, type: 'IMAGE' })}
                               />
                             );
-                          } else if (att.type === 'VIDEO') {
+                          } else if (fileType === 'VIDEO') {
                             return (
                               <video
                                 key={idx}
                                 src={mediaUrl}
                                 crossOrigin="anonymous"
                                 controls
-                                className="max-w-xs max-h-60 rounded border border-discord-darkest"
+                                className="max-w-full sm:max-w-sm max-h-[400px] rounded border border-discord-darkest bg-black"
                               />
                             );
                           } else {
@@ -700,7 +727,6 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
                 const v = e.target.value;
                 setNewMessage(v);
                 const now = Date.now();
-                // 🟢 使用 useRef 来检查，不污染 window 对象
                 if (now - lastTypingEmitTimeRef.current > 1000) {
                   if (isDM && dmConversationId) socketService.sendTyping({ conversationId: dmConversationId });
                   else if (!isDM && channelId) socketService.sendTyping({ channelId });
