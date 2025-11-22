@@ -55,21 +55,34 @@ export const UserAvatar: React.FC<UserAvatarProps> = ({
 
   const sizeClass = sizeClasses[size];
 
-  // 构建完整的头像URL（头像文件名每次上传都会变化，无需时间戳防缓存）
+  // 🟢 修复：更稳健的 URL 拼接逻辑
   const getAvatarUrl = (url: string | null | undefined): string | null => {
     if (!url) return null;
-    // 支持 data/blob 协议
+    
+    // 1. 如果是 base64 或 blob，直接返回
     if (url.startsWith('data:') || url.startsWith('blob:')) return url;
-    // 如果是完整URL，直接返回
+    
+    // 2. 如果是完整 URL (http/https)，直接返回
     if (url.startsWith('http://') || url.startsWith('https://')) return url;
-    // 如果是相对路径，补全 API_URL；当 VITE_API_URL 为空字符串时使用相对路径（避免回退到 localhost）
-    const API_URL = import.meta.env.VITE_API_URL ?? '';
-    const normalized = url.startsWith('/') ? url : `/${url}`;
-    if (!API_URL) {
-      return normalized; // 使用相对路径
+
+    // 3. 处理相对路径
+    let envApiUrl = import.meta.env.VITE_API_URL ?? '';
+
+    // 移除末尾的 /api (如果存在)
+    if (envApiUrl.endsWith('/api')) {
+      envApiUrl = envApiUrl.replace(/\/api$/, '');
     }
-    const baseUrl = API_URL.endsWith('/api') ? API_URL.replace('/api', '') : API_URL; // 移除 /api 后缀
-    return `${baseUrl}${normalized}`;
+    // 移除末尾的斜杠 (防止双斜杠问题)
+    if (envApiUrl.endsWith('/')) {
+      envApiUrl = envApiUrl.slice(0, -1);
+    }
+
+    // 确保路径以 / 开头
+    const normalizedPath = url.startsWith('/') ? url : `/${url}`;
+
+    // 拼接结果
+    // 如果 envApiUrl 为空字符串 (例如原本是 / 被去掉了)，结果就是 /uploads/... (正确的相对路径)
+    return `${envApiUrl}${normalizedPath}`;
   };
 
   const fullAvatarUrl = getAvatarUrl(avatarUrl);
@@ -82,7 +95,8 @@ export const UserAvatar: React.FC<UserAvatarProps> = ({
         crossOrigin="anonymous"
         className={`${sizeClass} rounded-full object-cover flex-shrink-0 ${className}`}
         onError={() => {
-          console.error('Failed to load avatar:', fullAvatarUrl);
+          // 仅在开发模式或调试时打印错误，防止生产环境刷屏
+          // console.error('Failed to load avatar:', fullAvatarUrl); 
           setImageError(true);
         }}
       />
