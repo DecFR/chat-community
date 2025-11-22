@@ -1,4 +1,4 @@
-import { useEffect, useState, type SyntheticEvent } from 'react';
+import { useEffect, useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useServerStore } from '../stores/serverStore';
@@ -12,6 +12,7 @@ import ChannelList from '../components/ChannelList';
 import MemberList from '../components/MemberList';
 import UserSettingsModal from '../components/UserSettingsModal';
 import NotificationCenter from '../components/NotificationCenter';
+import { UserAvatar } from '../components/UserAvatar';
 
 // 类型定义
 interface MessageItem {
@@ -42,11 +43,10 @@ interface UserProfileUpdateData {
   username?: string;
 }
 
-// 🟢 新增：头像 URL 处理辅助函数
+// 头像 URL 处理辅助函数
 const getAvatarUrl = (url: string | undefined | null) => {
   if (!url) return undefined;
   if (url.startsWith('http') || url.startsWith('data:')) return url;
-  // 获取 API 地址并移除末尾的 /api
   const API_URL = (import.meta.env.VITE_API_URL || '').replace(/\/api\/?$/, '');
   return `${API_URL}${url.startsWith('/') ? '' : '/'}${url}`;
 };
@@ -62,10 +62,10 @@ export default function MainLayout() {
 
   const isChatView = location.pathname.startsWith('/app/channel/') || location.pathname.startsWith('/app/dm/');
 
-  // 初始未读加载
+  // 🟢 修复 1：依赖改为 user?.id，防止对象引用变化导致死循环
   useEffect(() => {
     const run = async () => {
-      if (!user) return;
+      if (!user?.id) return;
       if (!isServersLoaded) return;
       try {
         const channels = (useServerStore.getState().servers || []).flatMap((s) => s.channels || []);
@@ -113,7 +113,8 @@ export default function MainLayout() {
       }
     };
     run();
-  }, [user, isServersLoaded, friends.length, setChannelCount, setDMCount]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, isServersLoaded, friends.length]); // 仅在 ID 变化或列表长度变化时运行
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -135,12 +136,15 @@ export default function MainLayout() {
       socketService.off('friendStatusUpdate', handleFriendStatusUpdate);
       socketService.off('friendRequestAccepted', handleFriendRequestAccepted);
     };
-  }, [isAuthenticated, navigate, loadUser, isServersLoaded, loadServers, loadFriends, loadPendingRequests, updateFriendStatus]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, navigate]);
 
+  // 仅用于触发重新渲染，无逻辑副作用
   useEffect(() => { return; }, [isServersLoaded, servers]);
 
+  // 🟢 修复 2：监听器依赖改为 user?.id
   useEffect(() => {
-    if (!isAuthenticated || !user) return;
+    if (!isAuthenticated || !user?.id) return;
     const handleServerUpdate = () => loadServers();
     const handleChannelUpdate = () => loadServers();
 
@@ -159,14 +163,15 @@ export default function MainLayout() {
       socketService.off('channelUpdated', handleChannelUpdate);
       socketService.off('channelDeleted', handleChannelUpdate);
     };
-  }, [isAuthenticated, user, loadServers]);
+  }, [isAuthenticated, user?.id, loadServers]);
 
   useEffect(() => {
     if (location.pathname === '/app') selectServer('');
   }, [location.pathname, selectServer]);
 
+  // 🟢 修复 3：自动加入房间依赖改为 user?.id
   useEffect(() => {
-    if (!user || !isAuthenticated) return;
+    if (!user?.id || !isAuthenticated) return;
     const path = location.pathname;
     if (!path.startsWith('/app/channel/')) return;
     const parts = path.split('/');
@@ -181,7 +186,7 @@ export default function MainLayout() {
         // ignore
       }
     }
-  }, [location.pathname, user, isAuthenticated, servers, selectServer]);
+  }, [location.pathname, user?.id, isAuthenticated, servers, selectServer]);
 
   useEffect(() => {
     const currentUserId = user?.id;
@@ -199,8 +204,9 @@ export default function MainLayout() {
     };
   }, [user?.id]);
 
+  // 🟢 修复 4：消息监听依赖改为 user?.id
   useEffect(() => {
-    if (!user) return;
+    if (!user?.id) return;
     const getActiveTarget = () => {
       const path = location.pathname;
       if (path.startsWith('/app/channel/')) return { type: 'channel' as const, id: path.split('/').pop()! };
@@ -249,7 +255,7 @@ export default function MainLayout() {
       const theme = user.settings.theme;
       if (theme === 'LIGHT') body.classList.add('light-theme'); else body.classList.remove('light-theme');
     }
-  }, [user]);
+  }, [user?.settings?.theme]);
 
   if (!user) {
     return (
@@ -272,19 +278,11 @@ export default function MainLayout() {
              <div className="h-14 bg-discord-darker flex items-center justify-around px-4 border-t border-discord-darkest md:hidden mt-auto">
                <NotificationCenter />
                <button onClick={() => setShowSettings(true)} className="p-2 rounded hover:bg-discord-gray">
-                 {/* 🟢 修复：使用 getAvatarUrl 处理图片路径 */}
-                 <img 
-                   src={getAvatarUrl(user.avatarUrl)} 
-                   className="w-8 h-8 rounded-full bg-gray-600 object-cover"
-                   alt={user.username}
-                   onError={(e: SyntheticEvent<HTMLImageElement, Event>) => (e.currentTarget.style.display = 'none')}
+                 <UserAvatar 
+                   username={user.username} 
+                   avatarUrl={getAvatarUrl(user.avatarUrl)} 
+                   size="sm" 
                  />
-                 {/* 默认头像逻辑不变 */}
-                 {!user.avatarUrl && (
-                   <div className="w-8 h-8 rounded-full bg-gray-600 flex items-center justify-center text-white font-bold">
-                     {user.username.substring(0, 2).toUpperCase()}
-                   </div>
-                 )}
                </button>
              </div>
           </div>
