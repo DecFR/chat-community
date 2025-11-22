@@ -25,7 +25,7 @@ const isDev = (process.env.NODE_ENV || 'development') === 'development';
 const enableCluster = !isDev && !isSingleCore && process.env.ENABLE_CLUSTER !== 'false';
 
 if (enableCluster && cluster.isPrimary) {
-  logger.info(`🚀 主进程 ${process.pid} 启动，2准备 fork ${maxThreads} 个 worker...`);
+  logger.info(`🚀 主进程 ${process.pid} 启动，准备 fork ${maxThreads} 个 worker...`);
   for (let i = 0; i < maxThreads; i++) {
     cluster.fork();
   }
