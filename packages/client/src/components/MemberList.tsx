@@ -1,191 +1,244 @@
+import { useEffect, useState } from 'react';
 import { useServerStore } from '../stores/serverStore';
-import { useLocation } from 'react-router-dom';
-import { useState, useEffect } from 'react';
 import { UserAvatar } from './UserAvatar';
 import { socketService } from '../lib/socket';
-import api from '../lib/api';
+import api from '../lib/api'; // 保持你原有的 api 引用方式
 
+// 定义符合 Prisma 输出的数据结构 (嵌套 user)
 interface Member {
-  id: string;
-  username: string;
-  avatarUrl?: string;
+  id: string;        // ServerMember 的 ID
   role: string;
-  status?: 'ONLINE' | 'IDLE' | 'DO_NOT_DISTURB' | 'OFFLINE';
+  userId: string;    // 关联 User 的 ID
+  user: {
+    id: string;
+    username: string;
+    avatarUrl?: string;
+    // 状态字段
+    status?: 'ONLINE' | 'IDLE' | 'DO_NOT_DISTURB' | 'OFFLINE';
+  };
+}
+
+interface ServerMemberUpdatePayload {
+  serverId: string;
+  userId: string;
+  username: string;
+  status: 'ONLINE' | 'OFFLINE' | 'IDLE' | 'DO_NOT_DISTURB';
+  action: 'online' | 'offline';
 }
 
 export default function MemberList() {
-  const { currentServerId, currentChannelId } = useServerStore();
-  const location = useLocation();
+  const { currentServerId } = useServerStore();
   const [members, setMembers] = useState<Member[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
 
-  // 加载成员列表 - Hooks 必须在所有条件判断之前调用
+  // 1. 加载成员列表
   useEffect(() => {
-    const loadMembers = async () => {
-      if (!currentServerId) {
-        setMembers([]);
-        return;
-      }
+    if (!currentServerId) {
+      setMembers([]);
+      return;
+    }
 
+    const fetchMembers = async () => {
+      setIsLoading(true);
       try {
+        // 注意：这里假设你的 API 返回的是 { success: true, data: [...] }
         const { data } = await api.get(`/servers/${currentServerId}/members`);
         if (data?.success) {
           setMembers(data.data);
         }
       } catch (error) {
         console.error('Failed to load members:', error);
-        setMembers([]);
+      } finally {
+        setIsLoading(false);
       }
     };
 
-    loadMembers();
+    fetchMembers();
+  }, [currentServerId]);
 
-    // 监听服务器成员更新事件
-    const handleMemberUpdate = (data: { serverId: string; userId: string; status?: 'ONLINE'|'IDLE'|'DO_NOT_DISTURB'|'OFFLINE'; action?: 'online'|'offline' }) => {
-      // 只处理当前服务器的成员更新
+  // 2. 监听 Socket 事件 (实时状态更新)
+  useEffect(() => {
+    const socket = socketService.getSocket();
+    if (!socket || !currentServerId) return;
+
+    // 处理成员状态变更 (上线/下线)
+    const handleMemberUpdate = (data: ServerMemberUpdatePayload) => {
       if (data.serverId !== currentServerId) return;
 
-      setMembers((prevMembers) => {
-        const memberIndex = prevMembers.findIndex((m) => m.id === data.userId);
+      setMembers((prev) => {
+        // 检查成员是否已在列表中
+        const exists = prev.find((m) => m.userId === data.userId);
         
-        if (memberIndex >= 0) {
-          // 更新现有成员的状态
-          const updatedMembers = [...prevMembers];
-          updatedMembers[memberIndex] = {
-            ...updatedMembers[memberIndex],
-            status: data.status,
-          };
-          return updatedMembers;
-        } else if (data.action === 'online') {
-          // 如果是新上线的成员，重新加载成员列表
-          loadMembers();
+        if (exists) {
+          // 如果存在，更新状态
+          return prev.map((m) =>
+            m.userId === data.userId
+              ? { ...m, user: { ...m.user, status: data.status } }
+              : m
+          );
+        } else {
+          // 如果是新成员加入且在线，理论上应该重新拉取列表
+          // 这里简单处理：如果状态是 online 但列表里没有，触发一次重载
+          if (data.action === 'online') {
+             // 可以在这里调用 fetchMembers()，或者依赖 serverMemberAdded 事件
+          }
+          return prev;
         }
-        
-        return prevMembers;
       });
     };
 
-    socketService.on('serverMemberUpdate', handleMemberUpdate);
-
-    // 监听好友资料更新,实时刷新成员列表中的头像和用户名
+    // 处理好友/用户资料更新 (改头像/名字)
     const handleProfileUpdate = (data: { userId: string; avatarUrl?: string; username?: string }) => {
-      setMembers((prevMembers) =>
-        prevMembers.map((member) =>
-          member.id === data.userId
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.userId === data.userId
             ? {
-                ...member,
-                ...(data.avatarUrl !== undefined && { avatarUrl: data.avatarUrl }),
-                ...(data.username && { username: data.username }),
+                ...m,
+                user: {
+                  ...m.user,
+                  ...(data.avatarUrl !== undefined && { avatarUrl: data.avatarUrl }),
+                  ...(data.username && { username: data.username }),
+                },
               }
-            : member
+            : m
         )
       );
     };
 
-    socketService.on('friendProfileUpdate', handleProfileUpdate);
-    socketService.on('userProfileUpdate', handleProfileUpdate);
+    // 处理新成员加入
+    const handleMemberAdded = () => {
+        // 重新拉取最稳妥
+        api.get(`/servers/${currentServerId}/members`).then(({ data }) => {
+            if (data?.success) setMembers(data.data);
+        });
+    };
+
+    // 处理成员离开
+    const handleMemberRemoved = (data: { serverId: string; userId: string }) => {
+      if (data.serverId !== currentServerId) return;
+      setMembers((prev) => prev.filter((m) => m.userId !== data.userId));
+    };
+
+    socket.on('serverMemberUpdate', handleMemberUpdate);
+    socket.on('userProfileUpdate', handleProfileUpdate);
+    socket.on('friendProfileUpdate', handleProfileUpdate);
+    socket.on('serverMemberAdded', handleMemberAdded);
+    socket.on('serverMemberRemoved', handleMemberRemoved);
 
     return () => {
-      socketService.off('serverMemberUpdate', handleMemberUpdate);
-      socketService.off('friendProfileUpdate', handleProfileUpdate);
-      socketService.off('userProfileUpdate', handleProfileUpdate);
+      socket.off('serverMemberUpdate', handleMemberUpdate);
+      socket.off('userProfileUpdate', handleProfileUpdate);
+      socket.off('friendProfileUpdate', handleProfileUpdate);
+      socket.off('serverMemberAdded', handleMemberAdded);
+      socket.off('serverMemberRemoved', handleMemberRemoved);
     };
   }, [currentServerId]);
 
-  // 只在频道页面显示成员列表
-  if (!location.pathname.includes('/app/channel/')) {
-    return null;
-  }
+  if (!currentServerId) return null;
 
-  // 如果没有选中服务器或频道，不显示
-  if (!currentServerId || !currentChannelId) {
-    return null;
-  }
+  // 3. 排序：在线 > 闲置 > 勿扰 > 离线
+  const sortedMembers = [...members].sort((a, b) => {
+    const statusOrder: Record<string, number> = {
+      ONLINE: 0,
+      IDLE: 1,
+      DO_NOT_DISTURB: 2,
+      OFFLINE: 3,
+    };
+    
+    // 如果 status 未定义，默认为 OFFLINE
+    const statusA = statusOrder[a.user.status || 'OFFLINE'];
+    const statusB = statusOrder[b.user.status || 'OFFLINE'];
 
-  // 按角色和在线状态分组成员
-  const onlineMembers = members.filter(m => m.status === 'ONLINE');
-  const offlineMembers = members.filter(m => m.status !== 'ONLINE');
+    if (statusA !== statusB) {
+      return statusA - statusB;
+    }
+    // 同状态按名字排序
+    return a.user.username.localeCompare(b.user.username);
+  });
+
+  // 4. 分组
+  const onlineMembers = sortedMembers.filter(m => m.user.status && m.user.status !== 'OFFLINE');
+  const offlineMembers = sortedMembers.filter(m => !m.user.status || m.user.status === 'OFFLINE');
 
   return (
-    <div className="w-60 bg-discord-darker border-l border-discord-darkest hidden xl:block overflow-y-auto">
-      <div className="p-4">
-        {currentServerId ? (
+    // 这里的 className 匹配 MainLayout 的布局 (w-60, h-full)
+    <div className="w-60 bg-discord-darker flex flex-col h-full border-l border-discord-darkest shrink-0">
+      <div className="h-12 border-b border-discord-darkest flex items-center px-4 font-semibold text-white shadow-md shrink-0">
+        成员
+      </div>
+
+      <div className="flex-1 overflow-y-auto scrollbar-thin p-3 space-y-6">
+        {isLoading ? (
+          <div className="text-center text-gray-500 mt-4 text-sm">加载中...</div>
+        ) : (
           <>
-            {/* 在线成员 */}
+            {/* 在线成员分组 */}
             {onlineMembers.length > 0 && (
-              <div className="mb-4">
-                <div className="text-xs font-semibold text-gray-400 mb-2">
-                  在线 - {onlineMembers.length}
-                </div>
-                <div className="space-y-1">
+              <div>
+                <h3 className="text-xs font-semibold text-gray-400 uppercase mb-2 pl-2">
+                  在线 — {onlineMembers.length}
+                </h3>
+                <div className="space-y-0.5">
                   {onlineMembers.map((member) => (
-                    <div
-                      key={member.id}
-                      className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-discord-hover cursor-pointer transition-colors"
-                    >
-                      <div className="relative">
-                        <UserAvatar
-                          username={member.username}
-                          avatarUrl={member.avatarUrl}
-                          size="sm"
-                        />
-                        <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-full border-2 border-discord-darker"></div>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm text-white truncate">{member.username}</div>
-                      </div>
-                      {member.role === 'OWNER' && (
-                        <div className="text-xs text-yellow-500">👑</div>
-                      )}
-                    </div>
+                    <MemberItem key={member.id} member={member} />
                   ))}
                 </div>
               </div>
             )}
 
-            {/* 离线成员 */}
+            {/* 离线成员分组 */}
             {offlineMembers.length > 0 && (
               <div>
-                <div className="text-xs font-semibold text-gray-400 mb-2">
-                  离线 - {offlineMembers.length}
-                </div>
-                <div className="space-y-1">
+                <h3 className="text-xs font-semibold text-gray-400 uppercase mb-2 pl-2">
+                  离线 — {offlineMembers.length}
+                </h3>
+                <div className="space-y-0.5">
                   {offlineMembers.map((member) => (
-                    <div
-                      key={member.id}
-                      className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-discord-hover cursor-pointer transition-colors opacity-50"
-                    >
-                      <div className="relative">
-                        <UserAvatar
-                          username={member.username}
-                          avatarUrl={member.avatarUrl}
-                          size="sm"
-                        />
-                        <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-gray-500 rounded-full border-2 border-discord-darker"></div>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm text-gray-400 truncate">{member.username}</div>
-                      </div>
-                      {member.role === 'OWNER' && (
-                        <div className="text-xs text-yellow-500">👑</div>
-                      )}
-                    </div>
+                    <MemberItem key={member.id} member={member} />
                   ))}
                 </div>
               </div>
             )}
 
-            {/* 无成员 */}
             {members.length === 0 && (
-              <div className="text-center text-gray-500 py-8 text-sm">
-                暂无成员
-              </div>
+              <div className="text-center text-gray-500 text-sm py-4">暂无成员</div>
             )}
           </>
-        ) : (
-          <div className="text-center text-gray-500 py-8 text-sm">
-            选择一个服务器
-          </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// 提取单个成员组件
+function MemberItem({ member }: { member: Member }) {
+  let statusColor = 'bg-gray-500';
+  const s = member.user.status;
+  if (s === 'ONLINE') statusColor = 'bg-green-500';
+  else if (s === 'IDLE') statusColor = 'bg-yellow-500';
+  else if (s === 'DO_NOT_DISTURB') statusColor = 'bg-red-500';
+
+  return (
+    <div className="flex items-center space-x-3 px-2 py-2 rounded hover:bg-discord-gray cursor-pointer group transition-colors">
+      <div className="relative">
+        <UserAvatar
+          username={member.user.username}
+          avatarUrl={member.user.avatarUrl}
+          size="sm"
+        />
+        {/* 状态点 */}
+        <div className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-discord-darker ${statusColor}`}></div>
+      </div>
+      
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between">
+          <span className={`font-medium truncate text-sm ${(!s || s === 'OFFLINE') ? 'text-gray-400' : 'text-gray-200 group-hover:text-white'}`}>
+            {member.user.username}
+          </span>
+          {member.role === 'OWNER' && (
+            <span title="服务器拥有者" className="text-xs">👑</span>
+          )}
+        </div>
       </div>
     </div>
   );
