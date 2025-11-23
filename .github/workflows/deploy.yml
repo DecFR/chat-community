@@ -1,0 +1,41 @@
+name: Deploy to DigitalOcean
+
+# 只有当推送到 master 分支时才触发
+on:
+  push:
+    branches: [ "master" ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        # 使用这个现成的 Action 插件来连接 SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          port: 22
+          # 👇 这里写要在服务器上执行的命令
+          script: |
+            echo "🚀 GitHub Action: 开始自动部署..."
+            
+            # 1. 进入项目目录
+            cd ~/chat-community
+            
+            # 2. 拉取最新代码
+            git pull origin master
+            
+            # 3. 重新构建前端 (因为没有热更新，必须构建)
+            echo "📦 构建前端..."
+            docker compose up -d --build client_builder
+            
+            # 4. 重启后端 (Dev模式会自动热更，但重启一下更稳妥，防止依赖变更)
+            echo "🔄 重启后端..."
+            docker compose restart api
+            
+            # 5. 清理不用的旧镜像 (防止硬盘爆满)
+            docker image prune -f
+            
+            echo "✅ 部署完成！"

@@ -190,9 +190,10 @@ export default function UserSettingsModal({
       if (avatarFile) {
         try {
           newAvatarUrl = await uploadFileInChunks({
-            file: avatarFile,
-            chunkSize: 2 * 1024 * 1024,
-            onProgress: () => {},
+            file: f,
+            chunkSize: 10 * 1024 * 1024, // 改为 10MB
+            concurrency: 3, // 新增：开启 3 线程并发
+            onProgress: (p) => setUploadProgress(p),
           });
         } catch (uploadErr: unknown) {
           // 🟢 修复：安全处理 unknown 类型错误

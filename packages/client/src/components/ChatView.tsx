@@ -534,8 +534,9 @@ export default function ChatView({ isDM = false }: ChatViewProps) {
           
           const url = await uploadFileInChunks({
             file: f,
-            chunkSize: 5 * 1024 * 1024,
-            onProgress: (percent) => setUploadProgress(percent),
+            chunkSize: 10 * 1024 * 1024, // 改为 10MB
+            concurrency: 3, // 新增：开启 3 线程并发
+            onProgress: (p) => setUploadProgress(p),
           });
 
           let type: 'IMAGE' | 'VIDEO' | 'FILE' = 'FILE';
