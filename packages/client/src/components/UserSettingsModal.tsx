@@ -92,6 +92,9 @@ export default function UserSettingsModal({
   const [theme, setTheme] = useState<'LIGHT' | 'DARK' | 'SYSTEM'>(user?.settings?.theme || 'DARK');
   const [friendRequestPrivacy, setFriendRequestPrivacy] = useState<'EVERYONE' | 'FRIENDS_OF_FRIENDS' | 'NONE'>(user?.settings?.friendRequestPrivacy || 'EVERYONE');
   const [isLoading, setIsLoading] = useState(false);
+  // 🟢 新增：进度状态，解决 setUploadProgress 报错
+  const [uploadProgress, setUploadProgress] = useState<number>(0); 
+  
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [usernameError, setUsernameError] = useState<string | null>(null);
   const [isCheckingUsername, setIsCheckingUsername] = useState(false);
@@ -179,38 +182,38 @@ export default function UserSettingsModal({
   };
 
   const handleProfileSave = async () => {
-    // 🟢 修复：确保 user 存在
     if (!user) return;
     
     setIsLoading(true);
     setToast(null);
+    setUploadProgress(0);
+
     try {
       let newAvatarUrl = user.avatarUrl;
 
       if (avatarFile) {
         try {
+          // 🟢 修复：使用 avatarFile，并传入 setUploadProgress
           newAvatarUrl = await uploadFileInChunks({
-            file: f,
-            chunkSize: 10 * 1024 * 1024, // 改为 10MB
-            concurrency: 3, // 新增：开启 3 线程并发
-            onProgress: (p) => setUploadProgress(p),
+            file: avatarFile,
+            chunkSize: 10 * 1024 * 1024, // 10MB 分片
+            concurrency: 3, // 3并发
+            onProgress: (percent) => setUploadProgress(percent),
           });
         } catch (uploadErr: unknown) {
-          // 🟢 修复：安全处理 unknown 类型错误
           const errorMessage = uploadErr instanceof Error ? uploadErr.message : String(uploadErr);
           console.error(uploadErr);
           throw new Error(`头像上传失败: ${errorMessage}`);
         }
       }
 
-      // 🟢 修复：构造更新对象，使用类型断言避免 TS 报错
+      // 构造更新对象
       const payload = {
         username: username !== user.username ? username : undefined,
         email: email || undefined,
         avatarUrl: newAvatarUrl !== user.avatarUrl ? newAvatarUrl : undefined,
       };
 
-      // 如果 api 定义不支持 avatarUrl，这里强制转换一下类型
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await userAPI.updateProfile(payload as any);
 
@@ -221,6 +224,7 @@ export default function UserSettingsModal({
         if (avatarPreview) URL.revokeObjectURL(avatarPreview);
         setAvatarFile(null);
         setAvatarPreview(null);
+        setUploadProgress(0);
       }, 500);
 
     } catch (err) {
@@ -345,7 +349,7 @@ export default function UserSettingsModal({
             </div>
 
             <button onClick={handleProfileSave} disabled={isLoading} className="w-full py-2 bg-green-600 hover:bg-green-700 rounded text-white font-medium disabled:opacity-50 transition-colors">
-              {isLoading ? '保存中...' : '保存更改'}
+              {isLoading ? `保存中... ${uploadProgress > 0 && uploadProgress < 100 ? `(${uploadProgress}%)` : ''}` : '保存更改'}
             </button>
           </div>
         );
